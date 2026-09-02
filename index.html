@@ -20,6 +20,8 @@
   --muted:#6b6b63;
   --danger:#B3352A;
   --danger-bg:#FBEAE8;
+  --success:#2E9E5B;
+  --success-bg:#EAF6EE;
 }
 
 *{ box-sizing:border-box; }
@@ -54,6 +56,11 @@ a{ color:var(--black); }
   padding:36px 32px 28px; position:relative; margin-top:40px;
   box-shadow: 0 24px 48px rgba(0,0,0,0.18);
 }
+
+@media (max-width:480px){
+  .auth-screen{ padding:16px; }
+  .auth-card{ padding:28px 20px 22px; margin-top:24px; }
+}
 .auth-card::before{
   content:''; position:absolute; top:0; left:0; right:0; height:4px; background:var(--yellow);
 }
@@ -83,6 +90,7 @@ a{ color:var(--black); }
 textarea{ resize:vertical; }
 
 .btn{ border:none; padding:10px 18px; font-size:13px; font-weight:600; letter-spacing:.01em; transition:background .15s, color .15s, border-color .15s; }
+.btn:disabled{ opacity:.55; cursor:default; pointer-events:none; }
 .btn-block{ width:100%; margin-top:20px; }
 .btn-primary{ background:var(--black); color:var(--yellow); }
 .btn-primary:hover{ background:var(--charcoal); }
@@ -98,27 +106,40 @@ textarea{ resize:vertical; }
 .app-shell{ min-height:100vh; display:flex; flex-direction:column; }
 .topbar{
   background:var(--black); color:var(--white); display:flex; align-items:center; justify-content:space-between;
-  padding:14px 28px; border-bottom:4px solid var(--yellow);
+  padding:14px 28px; border-bottom:4px solid var(--yellow); flex-wrap:wrap; gap:10px 16px;
 }
-.topbar-left{ display:flex; align-items:center; gap:14px; }
-.topbar-logo{ width:40px; height:40px; object-fit:contain; }
-.topbar-title{ display:flex; flex-direction:column; line-height:1.2; }
+.topbar-left{ display:flex; align-items:center; gap:14px; min-width:0; }
+.topbar-logo{ width:40px; height:40px; object-fit:contain; flex-shrink:0; }
+.topbar-title{ display:flex; flex-direction:column; line-height:1.2; min-width:0; }
 .topbar-title-main{ font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:16px; letter-spacing:.02em; }
 .topbar-title-sub{ font-size:11px; color:#c9c9c9; }
-.topbar-right{ display:flex; align-items:center; gap:16px; }
+.topbar-right{ display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
 .topbar-user{ display:flex; flex-direction:column; align-items:flex-end; line-height:1.3; }
 .topbar-user-name{ font-size:13px; font-weight:600; }
 .topbar-user-email{ font-size:11px; color:#a8a8a8; }
 
 .app-body{ flex:1; max-width:1240px; margin:0 auto; width:100%; padding:0 28px 60px; }
 
-.tabs{ display:flex; gap:4px; margin-top:20px; border-bottom:1px solid var(--line); }
-.tab-btn{ background:transparent; border:none; padding:12px 6px; margin-right:22px; font-size:14px; font-weight:600; color:var(--muted); border-bottom:3px solid transparent; }
+.tabs{ display:flex; gap:4px; margin-top:20px; border-bottom:1px solid var(--line); overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
+.tabs::-webkit-scrollbar{ display:none; }
+.tab-btn{ background:transparent; border:none; padding:12px 6px; margin-right:22px; font-size:14px; font-weight:600; color:var(--muted); border-bottom:3px solid transparent; white-space:nowrap; flex-shrink:0; }
 .tab-btn.active{ color:var(--black); border-bottom-color:var(--yellow); }
 .tab-btn:hover{ color:var(--black); }
 
 .tab-content{ padding-top:24px; }
 .panel{ display:flex; flex-direction:column; gap:24px; }
+
+@media (max-width:640px){
+  .topbar{ padding:12px 16px; }
+  .topbar-title-main{ font-size:14px; }
+  .topbar-right{ width:100%; justify-content:space-between; }
+  .topbar-user{ align-items:flex-start; }
+  .app-body{ padding:0 14px 40px; }
+  .tab-btn{ margin-right:16px; font-size:13px; padding:10px 4px; }
+}
+@media (max-width:380px){
+  .topbar-user-email{ display:none; }
+}
 
 /* ---------- KPIs ---------- */
 .kpi-grid{ display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; }
@@ -140,11 +161,26 @@ textarea{ resize:vertical; }
   .kpi-grid{ grid-template-columns:repeat(2, 1fr); }
   .kpi-card-hero{ grid-column:span 2; }
 }
+@media (max-width: 480px){
+  .kpi-grid{ grid-template-columns:1fr; }
+  .kpi-card-hero{ grid-column:span 1; }
+  .kpi-hero-value{ font-size:34px; }
+}
 
 /* ---------- Panels / charts ---------- */
 .panel-row{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
 .chart-box{ background:var(--white); border:1px solid var(--line); padding:18px 20px 8px; }
 .chart-box-wide{ grid-column:1 / -1; }
+.kpi-row{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+@media (max-width:860px){ .kpi-row{ grid-template-columns:1fr; } }
+.kpi-card{ background:var(--white); border:1px solid var(--line); padding:18px 20px; }
+.kpi-card-label{ font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px; }
+.kpi-card-value{ font-family:'Space Grotesk','Inter',sans-serif; font-size:32px; font-weight:700; line-height:1; }
+.kpi-card-sub{ margin-top:8px; font-size:13px; color:var(--muted); }
+.kpi-delta{ font-weight:700; }
+.delta-up{ color:var(--success); }
+.delta-down{ color:var(--danger); }
+.delta-flat{ color:var(--muted); }
 .chart-title{ font-size:14px; font-weight:700; margin-bottom:12px; }
 
 @media (max-width: 900px){
@@ -164,6 +200,14 @@ textarea{ resize:vertical; }
 .toolbar-right{ display:flex; gap:10px; }
 .search-input{ min-width:260px; }
 .toolbar select{ width:auto; min-width:150px; }
+
+@media (max-width:640px){
+  .toolbar{ flex-direction:column; align-items:stretch; }
+  .toolbar-left, .toolbar-right{ width:100%; }
+  .toolbar-right .btn{ width:100%; }
+  .search-input{ min-width:0; width:100%; }
+  .toolbar select{ flex:1; min-width:0; }
+}
 
 .status-chip-row{ display:flex; flex-wrap:wrap; gap:8px; }
 .status-chip{
@@ -213,6 +257,16 @@ textarea{ resize:vertical; }
 .modal-form{ padding:20px 24px; overflow-y:auto; display:flex; flex-direction:column; gap:18px; }
 .modal-footer{ display:flex; justify-content:flex-end; gap:10px; padding-top:8px; border-top:1px solid var(--line); position:sticky; bottom:0; background:var(--white); }
 
+@media (max-width:640px){
+  .modal-overlay{ padding:0; align-items:flex-end; }
+  .modal-card{ max-width:100%; width:100%; max-height:92vh; }
+  .modal-card-sm{ max-width:100%; }
+  .modal-header{ padding:16px 18px; }
+  .modal-form{ padding:16px 18px; }
+  .modal-footer{ flex-direction:column-reverse; }
+  .modal-footer .btn{ width:100%; }
+}
+
 .form-section{ border:none; padding:0; margin:0; }
 .form-section legend{ font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--charcoal); padding:0 0 10px; width:100%; border-bottom:1px solid var(--line); margin-bottom:12px; }
 .form-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px 16px; }
@@ -222,14 +276,11 @@ textarea{ resize:vertical; }
 @media (max-width:600px){ .form-grid{ grid-template-columns:1fr; } }
 
 .progress-editor{ display:flex; flex-direction:column; gap:14px; }
-.progress-editor-row{ display:grid; grid-template-columns:90px 1fr 72px; align-items:center; gap:12px; }
+.progress-editor-row{ display:grid; grid-template-columns:90px 1fr 48px; align-items:center; gap:12px; }
 .progress-editor-row label{ font-size:13px; font-weight:600; }
 .progress-editor-value{ font-size:13px; font-weight:700; text-align:right; }
-.progress-editor-total{ display:grid; grid-template-columns:90px 1fr 72px; align-items:center; gap:12px; padding-top:8px; border-top:1px dashed var(--line); }
+.progress-editor-total{ display:grid; grid-template-columns:90px 1fr 48px; align-items:center; gap:12px; padding-top:8px; border-top:1px dashed var(--line); }
 .progress-editor-total label{ font-size:13px; font-weight:700; }
-.progress-editor-number-wrap{ display:flex; align-items:center; justify-content:flex-end; gap:4px; }
-.progress-editor-number{ width:52px; padding:5px 6px; text-align:right; font-size:13px; font-weight:700; }
-.progress-editor-number-wrap span{ font-size:13px; font-weight:700; color:var(--charcoal); }
 input[type=range]{ accent-color:var(--black); }
 
 </style>
@@ -259,14 +310,6 @@ const STATUS_COLORS = {
 };
 
 const TIPO_CIUDAD_OPTIONS = ['Principal','Secundaria','Resto del pais'];
-
-/* Campos de fecha disponibles para agrupar las métricas de "Análisis" por semana */
-const WEEK_FIELD_OPTIONS = [
-  { key:'fEntrega',     label:'Fecha de entrega' },
-  { key:'fInicioObra',  label:'Fecha de inicio de obra' },
-  { key:'fLiquidacion', label:'Fecha de liquidación' },
-  { key:'lastModifiedAt', label:'Última modificación' },
-];
 
 const FIELD_GROUPS = [
   { key:'general', title:'Información general', fields:[
@@ -338,9 +381,7 @@ let pendingDeleteUserEmail = null;
 let userModalState = null; // { mode:'new'|'reset', email?, draft:{} }
 let userActionError = '';
 let userActionNotice = null; // { title, body } shown after create/reset
-let analisisWeekField = 'fEntrega';   // campo de fecha usado para agrupar las métricas semanales
-let analisisRefreshing = false;       // true mientras se recargan los datos desde el almacenamiento
-let analisisLastRefresh = null;       // ISO string de la última actualización manual
+let isRefreshing = false;
 
 const root = document.getElementById('root');
 
@@ -372,68 +413,59 @@ function computeAvance(p){
   const t = Number(p.tuberia)||0, c = Number(p.cableado)||0, e = Number(p.equipos)||0;
   return Math.round((t+c+e)/3);
 }
-
-/* ---------- Utilidades para las métricas semanales de "Análisis" ---------- */
-function parseValidDate(v){
-  if (!v) return null;
-  const s = String(v).trim();
-  if (!/^\d{4}-\d{2}-\d{2}/.test(s)) return null; // descarta null, "N/A", "00:00:00", etc.
-  const d = new Date(s.slice(0,10) + 'T00:00:00');
-  if (isNaN(d.getTime())) return null;
-  if (d.getFullYear() < 2000 || d.getFullYear() > 2100) return null; // descarta fechas centinela (ej. 1900-12-31)
-  return d;
-}
-function getWeekStart(date){
-  const d = new Date(date);
-  const day = d.getDay(); // 0=domingo … 6=sábado
-  const diff = (day === 0 ? -6 : 1 - day); // la semana inicia el lunes
-  const monday = new Date(d);
-  monday.setDate(d.getDate() + diff);
-  monday.setHours(0,0,0,0);
-  return monday;
-}
-function weekKey(d){
-  return d.toISOString().slice(0,10);
-}
-function weekLabel(monday){
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  const fmt = x => `${String(x.getDate()).padStart(2,'0')}/${String(x.getMonth()+1).padStart(2,'0')}`;
-  return `${fmt(monday)}–${fmt(sunday)}`;
-}
-/**
- * Agrupa los proyectos en semanas (lunes a domingo) según el campo de fecha indicado.
- * Devuelve { weeks:[{key,monday,label,items:[...]}], withoutDate: n }
- */
-function buildWeeklyBuckets(field, maxWeeks){
-  const withDate = projects
-    .map(p => ({ p, d: parseValidDate(p[field]) }))
-    .filter(x => x.d);
-
-  if (!withDate.length){
-    return { weeks: [], withoutDate: projects.length };
-  }
-
-  const buckets = new Map();
-  withDate.forEach(({p,d}) => {
-    const monday = getWeekStart(d);
-    const key = weekKey(monday);
-    if (!buckets.has(key)) buckets.set(key, { key, monday, items: [] });
-    buckets.get(key).items.push(p);
-  });
-
-  let weeks = Array.from(buckets.values()).sort((a,b) => a.monday - b.monday);
-  if (maxWeeks && weeks.length > maxWeeks) weeks = weeks.slice(-maxWeeks); // últimas N semanas
-  weeks.forEach(w => { w.label = weekLabel(w.monday); });
-
-  return { weeks, withoutDate: projects.length - withDate.length };
-}
-
 function nextId(){
   return projects.reduce((m,p)=>Math.max(m,p.id||0),0)+1;
 }
 function uniqueValues(key){
   return Array.from(new Set(projects.map(p=>p[key]).filter(Boolean))).sort((a,b)=>String(a).localeCompare(String(b)));
+}
+
+/* ---------- Utilidades de semanas (para comparativos semana a semana) ---------- */
+// Semanas de lunes a domingo, calculadas con la fecha real del navegador.
+function parseDateSafe(v){
+  if (!v) return null;
+  const d = new Date(v);
+  return isNaN(d) ? null : d;
+}
+function mondayOf(date){
+  const d = new Date(date);
+  d.setHours(0,0,0,0);
+  const day = d.getDay(); // 0=domingo … 6=sábado
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d;
+}
+function addDays(date, n){
+  const d = new Date(date);
+  d.setDate(d.getDate() + n);
+  return d;
+}
+function fmtDayMonth(date){
+  return `${String(date.getDate()).padStart(2,'0')}/${String(date.getMonth()+1).padStart(2,'0')}`;
+}
+// Construye N semanas consecutivas (lunes a domingo) terminando en la semana actual.
+function buildWeeklyBuckets(weeksBack){
+  const thisMonday = mondayOf(new Date());
+  const buckets = [];
+  for (let i = weeksBack - 1; i >= 0; i--){
+    const monday = addDays(thisMonday, -7*i);
+    const sunday = addDays(monday, 6);
+    buckets.push({
+      monday, sunday,
+      label: `${fmtDayMonth(monday)}–${fmtDayMonth(sunday)}`,
+      isCurrent: i === 0,
+    });
+  }
+  return buckets;
+}
+// Cuenta, para cada semana, cuántos proyectos tienen una fecha (dateField) dentro de ese rango.
+function countByWeek(dateField, buckets){
+  return buckets.map(b => projects.filter(p => {
+    const d = parseDateSafe(p[dateField]);
+    if (!d) return false;
+    const dd = new Date(d); dd.setHours(0,0,0,0);
+    return dd >= b.monday && dd <= b.sunday;
+  }).length);
 }
 
 /* ---------- Almacenamiento persistente (window.storage) ---------- */
@@ -480,35 +512,13 @@ async function loadAll(){
     if (migrated) await storageSet('sy_dc_users', users);
   } else {
     users = [{
-      name: 'Administrador Syntesys',
-      email: 'admin@syntesys.co',
-      passHash: simpleHash('4dm1nsys'),
+      name: 'Andrés Felipe Flórez',
+      email: 'andres.florez@syntesys.co',
+      passHash: simpleHash('Syntesys 2026+'),
       role: 'admin',
       createdAt: new Date().toISOString(),
     }];
     await storageSet('sy_dc_users', users);
-  }
-
-  // Garantiza que la cuenta admin@syntesys.co exista y tenga rol de administrador,
-  // incluso si el almacenamiento ya tenía otros usuarios cargados de antes.
-  {
-    const adminEmail = 'admin@syntesys.co';
-    const admin = users.find(x => x.email.toLowerCase() === adminEmail);
-    let changed = false;
-    if (!admin){
-      users.push({
-        name: 'Administrador Syntesys',
-        email: adminEmail,
-        passHash: simpleHash('4dm1nsys'),
-        role: 'admin',
-        createdAt: new Date().toISOString(),
-      });
-      changed = true;
-    } else if (admin.role !== 'admin'){
-      admin.role = 'admin';
-      changed = true;
-    }
-    if (changed) await storageSet('sy_dc_users', users);
   }
 
   changelog = Array.isArray(c) ? c : [];
@@ -530,6 +540,42 @@ async function loadAll(){
 async function persistProjects(){ await storageSet('sy_dc_projects', projects); }
 async function persistUsers(){ await storageSet('sy_dc_users', users); }
 async function persistChangelog(){ await storageSet('sy_dc_changelog', changelog); }
+
+/* ---------- Actualizar (traer cambios hechos por otros usuarios) ---------- */
+// A diferencia de loadAll(), esta función NO toca la sesión activa ni la
+// pestaña en la que se encuentra la persona: solo vuelve a traer los datos
+// compartidos (proyectos, usuarios, historial) desde el almacenamiento.
+async function refreshData(){
+  if (isRefreshing) return;
+  isRefreshing = true;
+  render();
+  try{
+    const [p, u, c] = await Promise.all([
+      storageGet('sy_dc_projects'),
+      storageGet('sy_dc_users'),
+      storageGet('sy_dc_changelog'),
+    ]);
+    if (Array.isArray(p)) projects = p;
+    if (Array.isArray(u)) users = u;
+    if (Array.isArray(c)) changelog = c;
+
+    // Si el usuario actual fue editado (rol) o eliminado desde otra sesión,
+    // reflejarlo aquí también.
+    if (currentUser){
+      const fresh = users.find(x => x.email.toLowerCase() === currentUser.email.toLowerCase());
+      if (fresh){
+        currentUser = { name: fresh.name, email: fresh.email, role: fresh.role || 'user' };
+        if (currentUser.role !== 'admin' && activeTab === 'usuarios') activeTab = 'resumen';
+      } else {
+        currentUser = null; authView = 'login';
+        await clearSession();
+      }
+    }
+  } finally {
+    isRefreshing = false;
+    render();
+  }
+}
 
 /* ---------- Sesión persistente (para no deslogear en cada recarga) ---------- */
 // La sesión se guarda en almacenamiento PERSONAL (no compartido) de este
@@ -656,6 +702,7 @@ function renderTopbar(){
         <span class="topbar-user-name">${esc(currentUser.name)}</span>
         <span class="topbar-user-email">${esc(currentUser.email)}</span>
       </div>
+      <button class="btn btn-ghost-yellow" data-action="refresh-data" ${isRefreshing ? 'disabled' : ''}>${isRefreshing ? 'Actualizando…' : '⟳ Actualizar'}</button>
       <button class="btn btn-ghost-yellow" data-action="logout">Salir</button>
     </div>
   </header>`;
@@ -801,26 +848,71 @@ function renderProyectos(){
 
 /* ----- ANÁLISIS ----- */
 function renderAnalisis(){
-  const weekData = buildWeeklyBuckets(analisisWeekField, 12);
-  const fieldLabel = (WEEK_FIELD_OPTIONS.find(f => f.key === analisisWeekField) || {}).label || '';
+  const WEEKS_BACK = 8;
+  const buckets = buildWeeklyBuckets(WEEKS_BACK);
+  const facturadas = countByWeek('fEmisionFactura', buckets);
+  const ocRecibida = countByWeek('fRecepcionOC', buckets);
+  const recaudadas = countByWeek('fFacturacionRecaudo', buckets);
+
+  const kpi = (label, arr) => {
+    const current = arr[arr.length-1];
+    const previous = arr[arr.length-2];
+    const diff = current - previous;
+    const deltaClass = diff > 0 ? 'delta-up' : diff < 0 ? 'delta-down' : 'delta-flat';
+    const arrow = diff > 0 ? '▲' : diff < 0 ? '▼' : '—';
+    const sign = diff > 0 ? '+' : '';
+    return `
+      <div class="kpi-card">
+        <div class="kpi-card-label">${esc(label)} · esta semana</div>
+        <div class="kpi-card-value">${current}</div>
+        <div class="kpi-card-sub">Semana anterior: ${previous} · <span class="kpi-delta ${deltaClass}">${arrow} ${sign}${diff}</span></div>
+      </div>
+    `;
+  };
+
+  const deltaCell = (arr, i) => {
+    if (i === 0) return '<span class="cell-sub">—</span>';
+    const diff = arr[i] - arr[i-1];
+    const cls = diff > 0 ? 'delta-up' : diff < 0 ? 'delta-down' : 'delta-flat';
+    const sign = diff > 0 ? '+' : '';
+    return `<span class="kpi-delta ${cls}">${diff===0 ? '—' : sign+diff}</span>`;
+  };
+
+  const weeklyRows = buckets.map((b,i) => `
+    <tr${b.isCurrent ? ' style="background:#FDFBEF"' : ''}>
+      <td class="cell-strong">${esc(b.label)}${b.isCurrent ? ' <span class="cell-sub">(actual)</span>' : ''}</td>
+      <td>${facturadas[i]} ${deltaCell(facturadas,i)}</td>
+      <td>${ocRecibida[i]} ${deltaCell(ocRecibida,i)}</td>
+      <td>${recaudadas[i]} ${deltaCell(recaudadas,i)}</td>
+    </tr>
+  `).join('');
 
   return `
     <section class="panel">
-      <div class="toolbar">
-        <div>
-          <h3 class="chart-title" style="margin-bottom:2px">Análisis de datos</h3>
-          <p class="auth-note">
-            Métricas calculadas en tiempo real sobre los ${projects.length} proyectos cargados en el sistema.
-            ${analisisLastRefresh ? `Última actualización: ${fmtDateTime(analisisLastRefresh)}.` : 'Aún no se ha actualizado manualmente en esta sesión.'}
-          </p>
+      <div>
+        <h3 class="chart-title" style="margin-bottom:2px">Comparativo semanal (lunes a domingo)</h3>
+        <p class="auth-note" style="margin-bottom:16px">Con base en las fechas reales registradas en cada proyecto: emisión de factura, recepción de OC y facturación de recaudo.</p>
+        <div class="kpi-row">
+          ${kpi('Tiendas facturadas', facturadas)}
+          ${kpi('Tiendas con OC recibida', ocRecibida)}
+          ${kpi('Tiendas recaudadas', recaudadas)}
         </div>
-        <div class="toolbar-right">
-          <select class="text-input" data-analisis-field title="Campo de fecha usado para agrupar las métricas por semana">
-            ${WEEK_FIELD_OPTIONS.map(f => `<option value="${f.key}" ${analisisWeekField===f.key?'selected':''}>Semana por: ${esc(f.label)}</option>`).join('')}
-          </select>
-          <button class="btn btn-primary" data-action="refresh-analisis" ${analisisRefreshing ? 'disabled' : ''}>
-            ${analisisRefreshing ? 'Actualizando…' : '↻ Actualizar'}
-          </button>
+      </div>
+
+      <div class="panel-row">
+        <div class="chart-box chart-box-wide">
+          <h3 class="chart-title">Facturación, OC y recaudo — últimas ${WEEKS_BACK} semanas</h3>
+          <canvas id="chartSemanal" height="220"></canvas>
+        </div>
+      </div>
+
+      <div>
+        <h3 class="chart-title" style="margin-bottom:8px">Detalle semana a semana</h3>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Semana</th><th>Tiendas facturadas</th><th>Tiendas con OC recibida</th><th>Tiendas recaudadas</th></tr></thead>
+            <tbody>${weeklyRows}</tbody>
+          </table>
         </div>
       </div>
 
@@ -834,31 +926,6 @@ function renderAnalisis(){
           <canvas id="chartTipoCiudad" height="240"></canvas>
         </div>
       </div>
-
-      <div class="panel-row">
-        <div class="chart-box chart-box-wide">
-          <h3 class="chart-title">Proyectos por estado — evolución semanal (${esc(fieldLabel)})</h3>
-          <canvas id="chartSemanaEstado" height="220"></canvas>
-          ${!weekData.weeks.length
-            ? `<p class="auth-note">No hay suficientes proyectos con "${esc(fieldLabel)}" registrada para calcular esta métrica.</p>`
-            : (weekData.withoutDate ? `<p class="auth-note">${weekData.withoutDate} proyecto(s) sin "${esc(fieldLabel)}" no se incluyen en este gráfico. Se muestran las últimas ${weekData.weeks.length} semana(s) con datos.</p>` : '')}
-        </div>
-      </div>
-
-      <div class="panel-row">
-        <div class="chart-box chart-box-wide">
-          <h3 class="chart-title">Cantidad de tiendas por semana</h3>
-          <canvas id="chartSemanaTiendas" height="180"></canvas>
-        </div>
-      </div>
-
-      <div class="panel-row">
-        <div class="chart-box chart-box-wide">
-          <h3 class="chart-title">Tiendas por coordinador — evolución semanal</h3>
-          <canvas id="chartSemanaCoordinador" height="220"></canvas>
-        </div>
-      </div>
-
       <div class="panel-row">
         <div class="chart-box chart-box-wide">
           <h3 class="chart-title">Avance promedio por contratista</h3>
@@ -1036,11 +1103,8 @@ function renderModal(){
             ${['tuberia','cableado','equipos'].map(k => `
               <div class="progress-editor-row">
                 <label>${k==='tuberia'?'Tubería':k==='cableado'?'Cableado':'Equipos'}</label>
-                <input type="range" min="0" max="100" step="1" value="${d[k]||0}" data-progress-slider data-progress-key="${k}" />
-                <div class="progress-editor-number-wrap">
-                  <input type="number" min="0" max="100" step="1" name="${k}" value="${d[k]||0}" class="progress-editor-number" data-progress-number data-progress-key="${k}" inputmode="numeric" />
-                  <span>%</span>
-                </div>
+                <input type="range" min="0" max="100" step="5" name="${k}" value="${d[k]||0}" data-progress-slider />
+                <span class="progress-editor-value" data-progress-value-for="${k}">${d[k]||0}%</span>
               </div>
             `).join('')}
             <div class="progress-editor-total">
@@ -1125,6 +1189,28 @@ function buildCharts(){
     });
   }
 
+  const elSemanal = document.getElementById('chartSemanal');
+  if (elSemanal){
+    const WEEKS_BACK = 8;
+    const buckets = buildWeeklyBuckets(WEEKS_BACK);
+    charts.semanal = new Chart(elSemanal, {
+      type:'bar',
+      data:{
+        labels: buckets.map(b=>b.label),
+        datasets:[
+          { label:'Facturadas', data: countByWeek('fEmisionFactura', buckets), backgroundColor:'#7A5FC0' },
+          { label:'OC recibida', data: countByWeek('fRecepcionOC', buckets), backgroundColor:'#E08A2C' },
+          { label:'Recaudadas', data: countByWeek('fFacturacionRecaudo', buckets), backgroundColor:'#141414' },
+        ]
+      },
+      options:{
+        responsive:true,
+        plugins:{ legend:{ position:'bottom', labels:{ font:{ family:'Inter' } } } },
+        scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } }
+      }
+    });
+  }
+
   const elEstado = document.getElementById('chartEstado');
   if (elEstado){
     charts.estado = new Chart(elEstado, {
@@ -1165,69 +1251,6 @@ function buildCharts(){
       type:'bar',
       data:{ labels:['Tubería','Cableado','Equipos'], datasets:[{ data:[avgOf('tuberia'),avgOf('cableado'),avgOf('equipos')], backgroundColor:['#141414','#F6D500','#3B7DD8'] }] },
       options: baseBarOptions()
-    });
-  }
-
-  /* ---- Métricas semanales (tab Análisis) ---- */
-  const weekData = buildWeeklyBuckets(analisisWeekField, 12);
-  const weeks = weekData.weeks;
-
-  const elSemanaEstado = document.getElementById('chartSemanaEstado');
-  if (elSemanaEstado && weeks.length){
-    charts.semanaEstado = new Chart(elSemanaEstado, {
-      type:'bar',
-      data:{
-        labels: weeks.map(w=>w.label),
-        datasets: STATUSES.map(st => ({
-          label: st,
-          data: weeks.map(w => w.items.filter(p=>p.estado===st).length),
-          backgroundColor: STATUS_COLORS[st]
-        }))
-      },
-      options:{
-        responsive:true,
-        plugins:{ legend:{ position:'bottom', labels:{ font:{ family:'Inter' }, boxWidth:12 } } },
-        scales:{ x:{ stacked:true }, y:{ stacked:true, beginAtZero:true, ticks:{ precision:0 } } }
-      }
-    });
-  }
-
-  const elSemanaTiendas = document.getElementById('chartSemanaTiendas');
-  if (elSemanaTiendas && weeks.length){
-    charts.semanaTiendas = new Chart(elSemanaTiendas, {
-      type:'bar',
-      data:{
-        labels: weeks.map(w=>w.label),
-        datasets:[{ label:'Tiendas', data: weeks.map(w=>w.items.length), backgroundColor:'#F6D500' }]
-      },
-      options: baseBarOptions()
-    });
-  }
-
-  const elSemanaCoord = document.getElementById('chartSemanaCoordinador');
-  if (elSemanaCoord && weeks.length){
-    const coordTotals = {};
-    weeks.forEach(w => w.items.forEach(p => {
-      const c = p.coordinador || 'Sin asignar';
-      coordTotals[c] = (coordTotals[c]||0) + 1;
-    }));
-    // Limitar a los coordinadores más activos para mantener el gráfico legible
-    const topCoords = Object.entries(coordTotals).sort((a,b)=>b[1]-a[1]).slice(0,7).map(x=>x[0]);
-    charts.semanaCoordinador = new Chart(elSemanaCoord, {
-      type:'bar',
-      data:{
-        labels: weeks.map(w=>w.label),
-        datasets: topCoords.map((c,i) => ({
-          label: c,
-          data: weeks.map(w => w.items.filter(p => (p.coordinador||'Sin asignar')===c).length),
-          backgroundColor: palette[i % palette.length]
-        }))
-      },
-      options:{
-        responsive:true,
-        plugins:{ legend:{ position:'bottom', labels:{ font:{ family:'Inter' }, boxWidth:12 } } },
-        scales:{ x:{ stacked:true }, y:{ stacked:true, beginAtZero:true, ticks:{ precision:0 } } }
-      }
     });
   }
 }
@@ -1275,6 +1298,7 @@ function onRootClick(e){
 
   switch(action){
     case 'show-login': authView='login'; authError=''; render(); break;
+    case 'refresh-data': refreshData(); break;
     case 'logout': currentUser=null; authView='login'; clearSession(); render(); break;
     case 'set-tab': activeTab = btn.dataset.tab; render(); break;
     case 'open-new-project':
@@ -1314,50 +1338,10 @@ function onRootClick(e){
     case 'cancel-delete-user': pendingDeleteUserEmail = null; render(); break;
     case 'do-delete-user': doDeleteUser(); break;
     case 'dismiss-user-notice': userActionNotice = null; render(); break;
-    case 'refresh-analisis': if (!analisisRefreshing) refreshAnalisisData(); break;
   }
-}
-
-/* Recarga proyectos/usuarios/auditoría desde el almacenamiento compartido para
-   reflejar en el Análisis los cambios cargados por otros usuarios (ediciones,
-   importaciones de Excel, etc.) sin necesidad de recargar toda la página. */
-async function refreshAnalisisData(){
-  analisisRefreshing = true;
-  render();
-  try{
-    const [p, u, c] = await Promise.all([
-      storageGet('sy_dc_projects'),
-      storageGet('sy_dc_users'),
-      storageGet('sy_dc_changelog'),
-    ]);
-    if (p && Array.isArray(p) && p.length) projects = p;
-    if (u && Array.isArray(u) && u.length) users = u;
-    if (Array.isArray(c)) changelog = c;
-  }catch(e){
-    console.error('No se pudo actualizar el análisis', e);
-  }
-  analisisLastRefresh = new Date().toISOString();
-  analisisRefreshing = false;
-  render();
 }
 
 function onRootChange(e){
-  if (e.target.matches('[data-progress-number]')){
-    // Al perder el foco, se normaliza el valor tecleado (entero, entre 0 y 100)
-    // y se refleja tanto en el slider como en el avance total.
-    let val = Math.round(Number(e.target.value));
-    if (isNaN(val)) val = 0;
-    val = Math.min(100, Math.max(0, val));
-    e.target.value = val;
-    syncProgressEditor(e.target);
-    return;
-  }
-  const weekSel = e.target.closest('[data-analisis-field]');
-  if (weekSel){
-    analisisWeekField = weekSel.value;
-    render();
-    return;
-  }
   const sel = e.target.closest('[data-filter]');
   if (sel){
     filters[sel.dataset.filter] = sel.value;
@@ -1373,41 +1357,19 @@ function onRootInput(e){
     renderProyectosTableOnly();
     return;
   }
-  if (e.target.matches('[data-progress-slider], [data-progress-number]')){
-    syncProgressEditor(e.target);
-    return;
+  if (e.target.matches('[data-progress-slider]')){
+    const name = e.target.name;
+    const valSpan = document.querySelector(`[data-progress-value-for="${name}"]`);
+    if (valSpan) valSpan.textContent = e.target.value + '%';
+    const sliders = document.querySelectorAll('[data-progress-slider]');
+    let total = 0;
+    sliders.forEach(s => total += Number(s.value));
+    const avg = Math.round(total / sliders.length);
+    const fill = document.getElementById('modalAvanceFill');
+    const label = document.getElementById('modalAvanceValue');
+    if (fill) fill.style.width = avg + '%';
+    if (label) label.textContent = avg + '%';
   }
-}
-
-/* Mantiene sincronizados el slider y el campo numérico de cada avance
-   (tubería/cableado/equipos), y recalcula el avance total consolidado.
-   El campo numérico permite escribir un valor exacto en lugar de depender
-   únicamente de arrastrar el slider. */
-function syncProgressEditor(target){
-  const key = target.dataset.progressKey;
-  let val = Number(target.value);
-  if (isNaN(val)) val = 0;
-  val = Math.min(100, Math.max(0, val));
-
-  const slider = document.querySelector(`[data-progress-slider][data-progress-key="${key}"]`);
-  const number = document.querySelector(`[data-progress-number][data-progress-key="${key}"]`);
-
-  if (slider && slider !== target) slider.value = val;
-  // No se sobrescribe el campo numérico mientras el usuario está escribiendo en él,
-  // para no mover el cursor ni "pelear" con lo que está tecleando.
-  if (number && number !== target) number.value = val;
-
-  const keys = ['tuberia','cableado','equipos'];
-  let total = 0;
-  keys.forEach(k => {
-    const n = document.querySelector(`[data-progress-number][data-progress-key="${k}"]`);
-    total += Math.min(100, Math.max(0, Number(n ? n.value : 0) || 0));
-  });
-  const avg = Math.round(total / keys.length);
-  const fill = document.getElementById('modalAvanceFill');
-  const label = document.getElementById('modalAvanceValue');
-  if (fill) fill.style.width = avg + '%';
-  if (label) label.textContent = avg + '%';
 }
 
 function renderProyectosTableOnly(){
@@ -1428,15 +1390,6 @@ function renderProyectosTableOnly(){
 }
 
 function onRootSubmit(e){
-  // El formulario de edición/creación de proyecto se maneja aparte porque no
-  // usa data-action-submit; hay que interceptarlo ANTES de cualquier return
-  // temprano, o el navegador ejecuta el envío nativo del <form> (recarga la
-  // página y borra todo el estado en memoria, incluida la sesión).
-  if (e.target.id === 'projectForm'){
-    e.preventDefault();
-    return saveProject(e.target);
-  }
-
   const form = e.target.closest('[data-action-submit]');
   if (!form) return;
   e.preventDefault();
@@ -1445,6 +1398,8 @@ function onRootSubmit(e){
   if (action === 'do-login') return doLogin(fd);
   if (action === 'do-create-user') return doCreateUser(fd);
   if (action === 'do-reset-user') return doResetUser(fd);
+
+  if (e.target.id === 'projectForm') return saveProject(e.target);
 }
 
 /* ---------- Lógica de autenticación ---------- */
@@ -1549,11 +1504,7 @@ async function saveProject(form){
   FIELD_GROUPS.forEach(g => g.fields.forEach(f => {
     draft[f.key] = fd.get(f.key) ?? '';
   }));
-  ['tuberia','cableado','equipos'].forEach(k => {
-    let v = Math.round(Number(fd.get(k)) || 0);
-    v = Math.min(100, Math.max(0, v));
-    draft[k] = v;
-  });
+  ['tuberia','cableado','equipos'].forEach(k => { draft[k] = Number(fd.get(k))||0; });
   draft.avance = computeAvance(draft);
   draft.lastModifiedBy = currentUser.name;
   draft.lastModifiedAt = new Date().toISOString();

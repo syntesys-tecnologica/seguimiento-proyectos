@@ -537,23 +537,53 @@ function countEstadosInRange(start, end){
   }).length);
 }
 
-/* ---------- Almacenamiento persistente (window.storage) ---------- */
-// storageGet ya NO devuelve solo el valor: devuelve { ok, value }.
-// window.storage.get() lanza una excepción tanto si la clave nunca ha
-// existido (primer uso normal) como si hubo un error real de lectura. Antes
-// no distinguíamos esos dos casos, así que un error real se trataba como
-// "todavía no hay datos" y el código reescribía el almacenamiento con los
-// valores por defecto, BORRANDO usuarios/proyectos ya creados. Ahora
-// marcamos ok:false cuando la lectura falla, y quien llama a esta función
-// NO debe sobrescribir el almacenamiento en ese caso — la persona puede
-// reintentar manualmente con el botón "Reintentar" que aparece en pantalla.
-// (Nota: aquí NO se reintenta automáticamente en ráfaga porque eso puede
-// disparar el límite de solicitudes del almacenamiento y causar más fallas
-// de las que resuelve.)
+/* ---------- Almacenamiento persistente (Firebase Firestore) ---------- */
+// IMPORTANTE: rellena estos datos con los de TU proyecto de Firebase antes
+// de publicar el archivo. Instrucciones completas al final de este mensaje.
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBEDLTr1JN6EefW0VJ7GGY2uCEK2J6jq3E",
+  authDomain: "seguimientos-proyectos-dc.firebaseapp.com",
+  projectId: "seguimientos-proyectos-dc",
+  storageBucket: "seguimientos-proyectos-dc.firebasestorage.app",
+  messagingSenderId: "225492109118",
+  appId: "1:225492109118:web:cf7d0a6132ce2e34530e6f",
+};
+
+// Carga perezosa del SDK de Firebase (import dinámico: funciona en un
+// <script> normal, sin necesidad de type="module" ni build tools) e inicia
+// sesión anónima, requerida por las reglas de seguridad de Firestore que
+// se explican en las instrucciones.
+let _fbReady = null;
+function getFirebase(){
+  if (!_fbReady){
+    _fbReady = (async () => {
+      const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js');
+      const { getFirestore, doc, getDoc, setDoc, deleteDoc } =
+        await import('https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js');
+      const { getAuth, signInAnonymously, onAuthStateChanged } =
+        await import('https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js');
+      const app = initializeApp(FIREBASE_CONFIG);
+      const db = getFirestore(app);
+      const auth = getAuth(app);
+      await new Promise((resolve, reject) => {
+        const unsub = onAuthStateChanged(auth, (user) => { if (user){ unsub(); resolve(); } });
+        signInAnonymously(auth).catch(reject);
+      });
+      return { db, doc, getDoc, setDoc, deleteDoc };
+    })();
+  }
+  return _fbReady;
+}
+
+// storageGet devuelve { ok, value }. ok:false significa que hubo un error
+// real de lectura (red, permisos, etc.) — quien llama a esta función NO debe
+// sobrescribir los datos guardados en ese caso — la persona puede reintentar
+// manualmente con el botón "Reintentar" que aparece en pantalla.
 async function storageGet(key){
   try{
-    const r = await window.storage.get(key, true);
-    return { ok: true, value: r ? JSON.parse(r.value) : null };
+    const { db, doc, getDoc } = await getFirebase();
+    const snap = await getDoc(doc(db, 'app_data', key));
+    return { ok: true, value: snap.exists() ? JSON.parse(snap.data().value) : null };
   }catch(e){
     console.error('storage get failed', key, e);
     return { ok: false, value: null, error: e };
@@ -561,8 +591,9 @@ async function storageGet(key){
 }
 async function storageSet(key, value){
   try{
-    const r = await window.storage.set(key, JSON.stringify(value), true);
-    return !!r;
+    const { db, doc, setDoc } = await getFirebase();
+    await setDoc(doc(db, 'app_data', key), { value: JSON.stringify(value), updatedAt: new Date().toISOString() });
+    return true;
   }catch(e){ console.error('storage set failed', key, e); return false; }
 }
 
@@ -711,18 +742,18 @@ async function refreshData(){
 // aunque la app se vuelva a cargar (por ejemplo al guardar un proyecto,
 // crear un usuario, o reabrir la pestaña).
 async function saveSession(email){
-  try{ await window.storage.set('sy_dc_session', JSON.stringify({ email }), false); }
+  try{ localStorage.setItem('sy_dc_session', JSON.stringify({ email })); }
   catch(e){ console.error('no se pudo guardar la sesión', e); }
 }
 async function clearSession(){
-  try{ await window.storage.delete('sy_dc_session', false); }
+  try{ localStorage.removeItem('sy_dc_session'); }
   catch(e){ /* si no existía, no pasa nada */ }
 }
 async function restoreSession(){
   try{
-    const r = await window.storage.get('sy_dc_session', false);
-    if (!r) return null;
-    const data = JSON.parse(r.value);
+    const raw = localStorage.getItem('sy_dc_session');
+    if (!raw) return null;
+    const data = JSON.parse(raw);
     return data && data.email ? data.email : null;
   }catch(e){ return null; }
 }

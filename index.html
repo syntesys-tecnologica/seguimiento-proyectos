@@ -1599,7 +1599,11 @@ function onRootClick(e){
       userActionError = ''; userActionNotice = null;
       userModalState = { mode:'self', email: currentUser.email, draft:{} };
       render(); break;
-    case 'logout': currentUser=null; authView='login'; clearSession(); render(); break;
+    case 'logout':
+      if (confirm('¿Estás seguro de que deseas salir de la aplicación?')) {
+        currentUser=null; authView='login'; clearSession(); render();
+      }
+      break;
     case 'retry-load': refreshData(); break;
     case 'set-tab': activeTab = btn.dataset.tab; render(); break;
     case 'open-new-project':

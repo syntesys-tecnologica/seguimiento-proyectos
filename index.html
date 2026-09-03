@@ -10,8 +10,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-title" content="Proyectos DC" />
 <title>Estado General de Proyectos DC — Syntesys Tecnológica</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
 
@@ -189,6 +189,7 @@ textarea{ resize:vertical; }
 .delta-down{ color:var(--danger); }
 .delta-flat{ color:var(--muted); }
 .chart-title{ font-size:14px; font-weight:700; margin-bottom:12px; }
+.chart-error{ color:var(--danger); font-size:12px; margin-top:8px; }
 
 @media (max-width: 900px){
   .panel-row{ grid-template-columns:1fr; }
@@ -384,6 +385,7 @@ let authView = 'login';
 let authError = '';
 let charts = {};
 let pendingDeleteId = null;
+let pendingArchiveAudit = false;
 let pendingDeleteUserEmail = null;
 let userModalState = null; // { mode:'new'|'reset', email?, draft:{} }
 let userActionError = '';
@@ -487,22 +489,27 @@ const ANALISIS_PERIODS = [
   { key:'quincena', label:'Últimos 15 días' },
   { key:'mes',      label:'Último mes' },
 ];
-function periodStartDate(period){
+// Devuelve el rango del periodo elegido y el rango, de la misma duración,
+// inmediatamente anterior — para poder comparar "esta semana" contra
+// "la semana pasada", etc. Para "todos" no hay comparación (devuelve null).
+function periodRangeDates(period){
   const now = new Date();
-  const start = new Date(now);
-  if (period === 'semana') start.setDate(start.getDate() - 7);
-  else if (period === 'quincena') start.setDate(start.getDate() - 15);
-  else if (period === 'mes') start.setMonth(start.getMonth() - 1);
+  let days;
+  if (period === 'semana') days = 7;
+  else if (period === 'quincena') days = 15;
+  else if (period === 'mes') days = 30;
   else return null; // 'todos'
-  return start;
+  const currentStart = new Date(now); currentStart.setDate(currentStart.getDate() - days);
+  const prevStart = new Date(now); prevStart.setDate(prevStart.getDate() - (days*2));
+  return { currentStart, currentEnd: now, prevStart, prevEnd: currentStart };
 }
-function projectsForAnalisisPeriod(period){
-  const start = periodStartDate(period);
-  if (!start) return projects;
-  return projects.filter(p => {
+// Cuenta, para cada estado, cuántos proyectos tienen lastModifiedAt dentro de [start, end).
+function countEstadosInRange(start, end){
+  return STATUSES.map(st => projects.filter(p => {
+    if (p.estado !== st) return false;
     const d = parseDateSafe(p.lastModifiedAt);
-    return d && d >= start;
-  });
+    return d && d >= start && d < end;
+  }).length);
 }
 
 /* ---------- Almacenamiento persistente (window.storage) ---------- */
@@ -638,7 +645,13 @@ async function restoreSession(){
 
 function logChange(entry){
   changelog.unshift({ ts: new Date().toISOString(), user: currentUser ? currentUser.name : 'Sistema', ...entry });
-  if (changelog.length > 400) changelog = changelog.slice(0,400);
+  // El historial ya NO se recorta automáticamente: todos los registros
+  // permanecen disponibles para consulta en cualquier momento. Solo se limita
+  // a un tope muy alto (20.000 registros) como salvaguarda técnica del
+  // almacenamiento, que en uso normal jamás debería alcanzarse. Si en algún
+  // momento se quiere "cerrar" un periodo, un administrador puede exportarlo
+  // y luego archivarlo manualmente desde la pestaña Auditoría.
+  if (changelog.length > 20000) changelog = changelog.slice(0,20000);
   persistChangelog();
 }
 
@@ -720,6 +733,7 @@ function renderApp(){
       ${pendingDeleteId ? renderConfirmDelete() : ''}
       ${userModalState ? renderUserModal() : ''}
       ${pendingDeleteUserEmail ? renderConfirmDeleteUser() : ''}
+      ${pendingArchiveAudit ? renderConfirmArchiveAudit() : ''}
     </div>
   `;
 }
@@ -782,11 +796,7 @@ function renderResumen(){
       </div>
 
       <div class="panel-row">
-        <div class="chart-box">
-          <h3 class="chart-title">Proyectos por estado</h3>
-          <canvas id="chartEstadoResumen" height="220"></canvas>
-        </div>
-        <div class="chart-box">
+        <div class="chart-box chart-box-wide">
           <h3 class="chart-title">Últimas actualizaciones</h3>
           <ul class="mini-log">
             ${changelog.slice(0,8).map(c => `
@@ -830,8 +840,6 @@ function renderProyectos(){
         </div>
         <div class="toolbar-right">
           <button class="btn btn-outline" data-action="export-excel">Exportar a Excel</button>
-          <button class="btn btn-outline" data-action="trigger-import">Importar Excel</button>
-          <input id="importFileInput" type="file" accept=".xlsx,.xls" style="display:none" />
           <button class="btn btn-primary" data-action="open-new-project">+ Nuevo proyecto</button>
         </div>
       </div>
@@ -966,8 +974,8 @@ function renderAnalisis(){
       </div>
 
       <div>
-        <h3 class="chart-title" style="margin-bottom:2px">Distribución operativa</h3>
-        <p class="auth-note" style="margin-bottom:14px">Con base en la fecha de última actualización de cada proyecto en la aplicación. "Todos los estados" muestra el total sin importar cuándo se actualizó por última vez.</p>
+        <h3 class="chart-title" style="margin-bottom:2px">Proyectos por estado — periodo actual vs. anterior</h3>
+        <p class="auth-note" style="margin-bottom:14px">Con base en la fecha de última actualización de cada proyecto en la aplicación. Compara, para cada estado, cuántos proyectos se actualizaron en el periodo elegido contra el mismo número de días inmediatamente anterior — por ejemplo, esta semana contra la semana pasada. "Todos los estados" muestra el total acumulado, sin comparación.</p>
         <div class="status-chip-row" style="margin-bottom:16px">
           ${ANALISIS_PERIODS.map(p => `
             <button class="status-chip ${analisisPeriod===p.key?'active':''}" style="--chip-color:#F6D500" data-action="set-analisis-period" data-period="${p.key}">
@@ -978,25 +986,21 @@ function renderAnalisis(){
       </div>
 
       <div class="panel-row">
-        <div class="chart-box">
-          <h3 class="chart-title">Proyectos por estado</h3>
+        <div class="chart-box chart-box-wide">
           <canvas id="chartEstado" height="240"></canvas>
         </div>
+      </div>
+
+      <div class="panel-row">
         <div class="chart-box">
           <h3 class="chart-title">Proyectos por ciudad</h3>
+          <p class="auth-note" style="margin-bottom:10px">Total acumulado de proyectos abiertos en cada ciudad, para ver dónde ha habido más apertura de tiendas.</p>
           <canvas id="chartCiudad" height="240"></canvas>
         </div>
-      </div>
-      <div class="panel-row">
-        <div class="chart-box chart-box-wide">
+        <div class="chart-box">
           <h3 class="chart-title">Proyectos por contratista (cantidad)</h3>
-          <canvas id="chartContratistaCount" height="200"></canvas>
-        </div>
-      </div>
-      <div class="panel-row">
-        <div class="chart-box chart-box-wide">
-          <h3 class="chart-title">Tiempo promedio de ejecución por contratista (días)</h3>
-          <canvas id="chartTiempoEjecucion" height="200"></canvas>
+          <p class="auth-note" style="margin-bottom:10px">Total acumulado de proyectos que ha desarrollado cada contratista.</p>
+          <canvas id="chartContratistaCount" height="240"></canvas>
         </div>
       </div>
     </section>
@@ -1007,8 +1011,16 @@ function renderAnalisis(){
 function renderAuditoria(){
   return `
     <section class="panel">
-      <h3 class="chart-title">Historial de cambios</h3>
-      <p class="auth-note" style="margin-bottom:16px">Cada edición guardada en la aplicación queda registrada aquí con el usuario responsable.</p>
+      <div class="toolbar">
+        <div>
+          <h3 class="chart-title" style="margin-bottom:2px">Historial de cambios</h3>
+          <p class="auth-note">Cada edición guardada en la aplicación queda registrada aquí con el usuario responsable y permanece disponible para consulta — no se borra sola.</p>
+        </div>
+        <div class="toolbar-right">
+          <button class="btn btn-outline" data-action="export-audit">Exportar auditoría a Excel</button>
+          ${currentUser.role === 'admin' ? '<button class="btn btn-outline" data-action="confirm-archive-audit">Archivar y reiniciar…</button>' : ''}
+        </div>
+      </div>
       <div class="table-wrap">
         <table class="data-table">
           <thead><tr><th>Fecha</th><th>Usuario</th><th>Proyecto</th><th>Cambio</th></tr></thead>
@@ -1024,6 +1036,7 @@ function renderAuditoria(){
           </tbody>
         </table>
       </div>
+      <div class="table-footnote">${changelog.length} registro(s) en el historial</div>
     </section>
   `;
 }
@@ -1035,7 +1048,7 @@ function renderUsuarios(){
       <div class="toolbar">
         <div>
           <h3 class="chart-title" style="margin-bottom:2px">Personas con acceso a la plataforma</h3>
-          <p class="auth-note">Aquí administras quién puede entrar: crear cuentas, restablecer una contraseña olvidada o quitar el acceso a alguien.</p>
+          <p class="auth-note">Aquí ves todas las personas registradas en el sistema: puedes crear cuentas, editar sus datos, restablecer una contraseña olvidada, cambiar su rol o quitarles el acceso.</p>
         </div>
         <div class="toolbar-right">
           <button class="btn btn-primary" data-action="open-new-user">+ Nueva persona</button>
@@ -1062,6 +1075,7 @@ function renderUsuarios(){
                 <td><span class="status-pill" style="--chip-color:${u.role==='admin' ? '#141414' : '#8c8c86'}">${u.role==='admin' ? 'Administrador' : 'Usuario'}</span></td>
                 <td class="cell-sub">${u.createdAt ? fmtDateTime(u.createdAt) : '—'}</td>
                 <td class="cell-actions">
+                  <button class="btn btn-text" data-action="open-edit-user" data-email="${esc(u.email)}">Editar</button>
                   <button class="btn btn-text" data-action="open-reset-user" data-email="${esc(u.email)}">Restablecer contraseña</button>
                   <button class="btn btn-text" data-action="toggle-user-role" data-email="${esc(u.email)}">${u.role==='admin' ? 'Quitar admin' : 'Hacer admin'}</button>
                   <button class="btn btn-text btn-text-danger" data-action="confirm-delete-user" data-email="${esc(u.email)}">Eliminar</button>
@@ -1077,17 +1091,23 @@ function renderUsuarios(){
 }
 
 function renderUserModal(){
-  const isNew = userModalState.mode === 'new';
+  const mode = userModalState.mode; // 'new' | 'reset' | 'edit'
+  const titles = { new:'Nueva persona', reset:'Restablecer contraseña', edit:'Editar persona' };
+  const submitActions = { new:'do-create-user', reset:'do-reset-user', edit:'do-edit-user' };
+  const submitLabels = { new:'Crear persona', reset:'Restablecer contraseña', edit:'Guardar cambios' };
+  const editingUser = mode !== 'new' ? users.find(u => u.email === userModalState.email) : null;
+
   return `
   <div class="modal-overlay" data-action="close-user-modal-overlay">
     <div class="modal-card modal-card-sm" data-stop-close>
       <div class="modal-header">
-        <h2>${isNew ? 'Nueva persona' : 'Restablecer contraseña'}</h2>
+        <h2>${titles[mode]}</h2>
         <button class="modal-close" data-action="close-user-modal">✕</button>
       </div>
-      <form id="userForm" class="modal-form" data-action-submit="${isNew ? 'do-create-user' : 'do-reset-user'}">
+      <form id="userForm" class="modal-form" data-action-submit="${submitActions[mode]}">
         ${userActionError ? `<div class="auth-error">${esc(userActionError)}</div>` : ''}
-        ${isNew ? `
+
+        ${mode === 'new' ? `
           <div class="field">
             <label>Nombre completo</label>
             <input type="text" name="name" required />
@@ -1096,12 +1116,10 @@ function renderUserModal(){
             <label>Correo corporativo</label>
             <input type="email" name="email" required />
           </div>
-        ` : `<p class="auth-note">Se asignará una nueva contraseña temporal a <strong>${esc(userModalState.email)}</strong>. Compártela con la persona por un medio seguro.</p>`}
-        <div class="field">
-          <label>${isNew ? 'Contraseña inicial' : 'Nueva contraseña temporal'}</label>
-          <input type="text" name="password" minlength="6" required placeholder="Mínimo 6 caracteres" />
-        </div>
-        ${isNew ? `
+          <div class="field">
+            <label>Contraseña inicial</label>
+            <input type="text" name="password" minlength="6" required placeholder="Mínimo 6 caracteres" />
+          </div>
           <div class="field">
             <label>Rol</label>
             <select name="role">
@@ -1110,9 +1128,29 @@ function renderUserModal(){
             </select>
           </div>
         ` : ''}
+
+        ${mode === 'edit' ? `
+          <div class="field">
+            <label>Nombre completo</label>
+            <input type="text" name="name" value="${esc(editingUser ? editingUser.name : '')}" required />
+          </div>
+          <div class="field">
+            <label>Correo corporativo</label>
+            <input type="email" name="email" value="${esc(editingUser ? editingUser.email : '')}" required />
+          </div>
+        ` : ''}
+
+        ${mode === 'reset' ? `
+          <p class="auth-note">Se asignará una nueva contraseña temporal a <strong>${esc(userModalState.email)}</strong>. Compártela con la persona por un medio seguro.</p>
+          <div class="field">
+            <label>Nueva contraseña temporal</label>
+            <input type="text" name="password" minlength="6" required placeholder="Mínimo 6 caracteres" />
+          </div>
+        ` : ''}
+
         <div class="modal-footer">
           <button type="button" class="btn btn-text" data-action="close-user-modal">Cancelar</button>
-          <button type="submit" class="btn btn-primary">${isNew ? 'Crear persona' : 'Restablecer contraseña'}</button>
+          <button type="submit" class="btn btn-primary">${submitLabels[mode]}</button>
         </div>
       </form>
     </div>
@@ -1231,6 +1269,23 @@ function renderConfirmDelete(){
   </div>`;
 }
 
+function renderConfirmArchiveAudit(){
+  return `
+  <div class="modal-overlay" data-action="cancel-archive-audit">
+    <div class="modal-card modal-card-sm" data-stop-close>
+      <div class="modal-header"><h2>Archivar y reiniciar auditoría</h2></div>
+      <div class="modal-form">
+        <p>Esto va a <strong>descargar primero un Excel</strong> con los ${changelog.length} registro(s) actuales del historial, y luego vaciará el historial en la aplicación para empezar de nuevo (por ejemplo, al cerrar el mes).</p>
+        <p class="auth-note">Guarda ese Excel en un lugar seguro: una vez reiniciado, el historial dentro de la aplicación no se puede recuperar.</p>
+        <div class="modal-footer">
+          <button class="btn btn-text" data-action="cancel-archive-audit">Cancelar</button>
+          <button class="btn btn-danger" data-action="do-archive-audit">Descargar y reiniciar</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
 /* ---------- Gráficos (Chart.js) ---------- */
 function destroyCharts(){
   Object.values(charts).forEach(c => { try{ c.destroy(); }catch(e){} });
@@ -1241,20 +1296,31 @@ function buildCharts(){
   destroyCharts();
   const palette = ['#141414','#F6D500','#3B7DD8','#2E9E5B','#E08A2C','#7A5FC0','#1B7F8C','#8c8c86'];
 
-  const elResumen = document.getElementById('chartEstadoResumen');
-  if (elResumen){
-    charts.estadoResumen = new Chart(elResumen, {
-      type:'bar',
-      data:{ labels: STATUSES, datasets:[{ data: STATUSES.map(st=>projects.filter(p=>p.estado===st).length), backgroundColor: STATUSES.map(st=>STATUS_COLORS[st]) }] },
-      options: baseBarOptions()
-    });
+  // Si por cualquier motivo la librería de gráficos no cargó (por ejemplo, sin
+  // conexión a internet o un bloqueo de red), lo mostramos de forma visible en
+  // cada recuadro en vez de dejarlo en blanco sin explicación.
+  function safeChart(el, key, config){
+    if (!el) return;
+    try{
+      if (typeof Chart === 'undefined') throw new Error('Chart.js no está disponible');
+      charts[key] = new Chart(el, config);
+    }catch(err){
+      console.error('No se pudo dibujar el gráfico', key, err);
+      const box = el.closest('.chart-box');
+      if (box && !box.querySelector('.chart-error')){
+        const msg = document.createElement('p');
+        msg.className = 'chart-error';
+        msg.textContent = 'No se pudo cargar la librería de gráficos. Revisa tu conexión a internet y actualiza la página.';
+        box.appendChild(msg);
+      }
+    }
   }
 
   const elSemanal = document.getElementById('chartSemanal');
   if (elSemanal){
     const WEEKS_BACK = 8;
     const buckets = buildWeeklyBuckets(WEEKS_BACK);
-    charts.semanal = new Chart(elSemanal, {
+    safeChart(elSemanal, 'semanal', {
       type:'bar',
       data:{
         labels: buckets.map(b=>b.label),
@@ -1274,18 +1340,39 @@ function buildCharts(){
 
   const elEstado = document.getElementById('chartEstado');
   if (elEstado){
-    const list = projectsForAnalisisPeriod(analisisPeriod);
-    charts.estado = new Chart(elEstado, {
-      type:'bar',
-      data:{ labels: STATUSES, datasets:[{ data: STATUSES.map(st=>list.filter(p=>p.estado===st).length), backgroundColor: STATUSES.map(st=>STATUS_COLORS[st]) }] },
-      options: baseBarOptions()
-    });
+    const range = periodRangeDates(analisisPeriod);
+    if (!range){
+      // "Todos los estados": total acumulado, sin comparación de periodo.
+      safeChart(elEstado, 'estado', {
+        type:'bar',
+        data:{ labels: STATUSES, datasets:[{ label:'Total', data: STATUSES.map(st=>projects.filter(p=>p.estado===st).length), backgroundColor: STATUSES.map(st=>STATUS_COLORS[st]) }] },
+        options: baseBarOptions()
+      });
+    } else {
+      const current = countEstadosInRange(range.currentStart, range.currentEnd);
+      const previous = countEstadosInRange(range.prevStart, range.prevEnd);
+      safeChart(elEstado, 'estado', {
+        type:'bar',
+        data:{
+          labels: STATUSES,
+          datasets:[
+            { label:'Este periodo', data: current, backgroundColor:'#F6D500' },
+            { label:'Periodo anterior', data: previous, backgroundColor:'#8c8c86' },
+          ]
+        },
+        options:{
+          responsive:true,
+          plugins:{ legend:{ display:true, position:'bottom', labels:{ font:{ family:'Inter' } } } },
+          scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } }
+        }
+      });
+    }
   }
 
   const elTipo = document.getElementById('chartTipoCiudad');
   if (elTipo){
     const tipos = uniqueValues('tipoCiudad');
-    charts.tipoCiudad = new Chart(elTipo, {
+    safeChart(elTipo, 'tipoCiudad', {
       type:'doughnut',
       data:{ labels: tipos, datasets:[{ data: tipos.map(t=>projects.filter(p=>p.tipoCiudad===t).length), backgroundColor: tipos.map((_,i)=>palette[i%palette.length]) }] },
       options:{ responsive:true, plugins:{ legend:{ position:'bottom', labels:{ font:{ family:'Inter' } } } } }
@@ -1299,48 +1386,37 @@ function buildCharts(){
       const items = projects.filter(p=>p.contratista===c);
       return Math.round(items.reduce((s,p)=>s+computeAvance(p),0)/items.length);
     });
-    charts.contratista = new Chart(elContratista, {
+    safeChart(elContratista, 'contratista', {
       type:'bar',
       data:{ labels: contratistas, datasets:[{ label:'Avance promedio %', data: avgs, backgroundColor:'#F6D500' }] },
       options:{ ...baseBarOptions(), indexAxis:'y' }
     });
   }
 
+  // Ciudad y contratista: totales ACUMULADOS de todos los proyectos (no se
+  // filtran por el selector de periodo), ordenados de mayor a menor cantidad.
   const elCiudad = document.getElementById('chartCiudad');
   if (elCiudad){
-    const list = projectsForAnalisisPeriod(analisisPeriod);
-    const ciudades = Array.from(new Set(list.map(p=>p.ciudad).filter(Boolean))).sort((a,b)=>String(a).localeCompare(String(b)));
-    const counts = ciudades.map(c => list.filter(p=>p.ciudad===c).length);
-    charts.ciudad = new Chart(elCiudad, {
+    const ciudades = uniqueValues('ciudad');
+    const paired = ciudades
+      .map(c => ({ c, n: projects.filter(p=>p.ciudad===c).length }))
+      .sort((a,b) => b.n - a.n);
+    safeChart(elCiudad, 'ciudad', {
       type:'bar',
-      data:{ labels: ciudades, datasets:[{ label:'Proyectos', data: counts, backgroundColor:'#3B7DD8' }] },
-      options:{ ...baseBarOptions(), indexAxis: ciudades.length > 8 ? 'y' : 'x' }
+      data:{ labels: paired.map(p=>p.c), datasets:[{ label:'Proyectos', data: paired.map(p=>p.n), backgroundColor:'#3B7DD8' }] },
+      options:{ ...baseBarOptions(), indexAxis: paired.length > 8 ? 'y' : 'x' }
     });
   }
 
   const elContratistaCount = document.getElementById('chartContratistaCount');
   if (elContratistaCount){
-    const list = projectsForAnalisisPeriod(analisisPeriod);
-    const contratistas = Array.from(new Set(list.map(p=>p.contratista).filter(Boolean))).sort((a,b)=>String(a).localeCompare(String(b)));
-    const counts = contratistas.map(c => list.filter(p=>p.contratista===c).length);
-    charts.contratistaCount = new Chart(elContratistaCount, {
-      type:'bar',
-      data:{ labels: contratistas, datasets:[{ label:'Proyectos', data: counts, backgroundColor:'#7A5FC0' }] },
-      options:{ ...baseBarOptions(), indexAxis:'y' }
-    });
-  }
-
-  const elTiempoEjecucion = document.getElementById('chartTiempoEjecucion');
-  if (elTiempoEjecucion){
     const contratistas = uniqueValues('contratista');
-    const avgs = contratistas.map(c => {
-      const items = projects.filter(p => p.contratista===c && Number(p.tiempoEjecucion) > 0);
-      if (!items.length) return 0;
-      return Math.round(items.reduce((s,p)=>s+Number(p.tiempoEjecucion),0)/items.length);
-    });
-    charts.tiempoEjecucion = new Chart(elTiempoEjecucion, {
+    const paired = contratistas
+      .map(c => ({ c, n: projects.filter(p=>p.contratista===c).length }))
+      .sort((a,b) => b.n - a.n);
+    safeChart(elContratistaCount, 'contratistaCount', {
       type:'bar',
-      data:{ labels: contratistas, datasets:[{ label:'Días promedio', data: avgs, backgroundColor:'#E08A2C' }] },
+      data:{ labels: paired.map(p=>p.c), datasets:[{ label:'Proyectos', data: paired.map(p=>p.n), backgroundColor:'#7A5FC0' }] },
       options:{ ...baseBarOptions(), indexAxis:'y' }
     });
   }
@@ -1359,10 +1435,6 @@ function afterAppRender(){
   if (activeTab === 'resumen' || activeTab === 'analisis'){
     requestAnimationFrame(buildCharts);
   }
-  const importInput = document.getElementById('importFileInput');
-  if (importInput){
-    importInput.addEventListener('change', handleImportFile);
-  }
 }
 
 /* ================= MANEJO DE EVENTOS ================= */
@@ -1372,13 +1444,14 @@ root.addEventListener('change', onRootChange);
 root.addEventListener('input', onRootInput);
 
 function onRootClick(e){
-  const overlay = e.target.closest('[data-action="close-modal-overlay"], [data-action="cancel-delete"], [data-action="close-user-modal-overlay"], [data-action="cancel-delete-user"]');
+  const overlay = e.target.closest('[data-action="close-modal-overlay"], [data-action="cancel-delete"], [data-action="close-user-modal-overlay"], [data-action="cancel-delete-user"], [data-action="cancel-archive-audit"]');
   if (overlay && !e.target.closest('[data-stop-close]')){
     const a = overlay.dataset.action;
     if (a === 'close-modal-overlay'){ modalState = null; }
     else if (a === 'cancel-delete'){ pendingDeleteId = null; }
     else if (a === 'close-user-modal-overlay'){ userModalState = null; userActionError=''; }
     else if (a === 'cancel-delete-user'){ pendingDeleteUserEmail = null; }
+    else if (a === 'cancel-archive-audit'){ pendingArchiveAudit = false; }
     render();
     return;
   }
@@ -1414,7 +1487,10 @@ function onRootClick(e){
       filters = { estado:new Set(), contratista:'', ciudad:'', coordinador:'', search:'' };
       render(); break;
     case 'export-excel': exportExcel(); break;
-    case 'trigger-import': document.getElementById('importFileInput').click(); break;
+    case 'export-audit': exportAuditLog(); break;
+    case 'confirm-archive-audit': pendingArchiveAudit = true; render(); break;
+    case 'cancel-archive-audit': pendingArchiveAudit = false; render(); break;
+    case 'do-archive-audit': doArchiveAudit(); break;
 
     case 'open-new-user':
       userActionError = ''; userActionNotice = null;
@@ -1423,6 +1499,10 @@ function onRootClick(e){
     case 'open-reset-user':
       userActionError = ''; userActionNotice = null;
       userModalState = { mode:'reset', email: btn.dataset.email, draft:{} };
+      render(); break;
+    case 'open-edit-user':
+      userActionError = ''; userActionNotice = null;
+      userModalState = { mode:'edit', email: btn.dataset.email, draft:{} };
       render(); break;
     case 'close-user-modal': userModalState = null; userActionError=''; render(); break;
     case 'toggle-user-role': toggleUserRole(btn.dataset.email); break;
@@ -1470,8 +1550,6 @@ function renderProyectosTableOnly(){
   if (section && activeTab==='proyectos'){
     const scrollX = window.scrollX, scrollY = window.scrollY;
     section.innerHTML = renderProyectos();
-    const importInput = document.getElementById('importFileInput');
-    if (importInput) importInput.addEventListener('change', handleImportFile);
     const input = section.querySelector('[data-filter="search"]');
     if (input){
       input.focus();
@@ -1498,6 +1576,7 @@ function onRootSubmit(e){
   if (action === 'do-login') return doLogin(fd);
   if (action === 'do-create-user') return doCreateUser(fd);
   if (action === 'do-reset-user') return doResetUser(fd);
+  if (action === 'do-edit-user') return doEditUser(fd);
 }
 
 /* ---------- Lógica de autenticación ---------- */
@@ -1554,6 +1633,45 @@ async function doResetUser(fd){
   } else {
     userModalState = null;
   }
+  render();
+}
+
+async function doEditUser(fd){
+  const name = String(fd.get('name')).trim();
+  const email = String(fd.get('email')).trim().toLowerCase();
+  if (!name || !email){
+    userActionError = 'Completa el nombre y el correo.';
+    render(); return;
+  }
+  const user = users.find(u => u.email === userModalState.email);
+  if (!user){
+    userModalState = null; render(); return;
+  }
+  const emailTaken = users.some(u => u !== user && u.email.toLowerCase() === email);
+  if (emailTaken){
+    userActionError = 'Ya existe otra cuenta registrada con ese correo.';
+    render(); return;
+  }
+
+  const oldName = user.name, oldEmail = user.email;
+  user.name = name;
+  user.email = email;
+  await persistUsers();
+
+  const changes = [];
+  if (oldName !== name) changes.push(`nombre: "${oldName}" → "${name}"`);
+  if (oldEmail.toLowerCase() !== email) changes.push(`correo: "${oldEmail}" → "${email}"`);
+  logChange({ project:'—', text: changes.length ? `Editó a ${oldName}: ${changes.join(' · ')}.` : `Editó a ${oldName} sin cambios.` });
+
+  // Si la persona se editó a sí misma, actualizamos su sesión activa y la
+  // clave con la que se guarda su sesión persistente para que no se le
+  // cierre la sesión ni pierda el acceso.
+  if (currentUser && currentUser.email.toLowerCase() === oldEmail.toLowerCase()){
+    currentUser = { name: user.name, email: user.email, role: user.role || 'user' };
+    await saveSession(user.email);
+  }
+
+  userModalState = null;
   render();
 }
 
@@ -1674,53 +1792,47 @@ function exportExcel(){
   logChange({ project:'—', text:'Exportó el estado general a Excel.' });
 }
 
-function handleImportFile(e){
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (evt) => {
-    try{
-      const wb = XLSX.read(evt.target.result, { type:'array', cellDates:true });
-      const sheetName = wb.SheetNames.includes('ESTATUS OPERACIONES 2026') ? 'ESTATUS OPERACIONES 2026' : wb.SheetNames[0];
-      const sheet = wb.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json(sheet, { defval:'' });
-      const labelToKey = {};
-      EXPORT_HEADERS.forEach(([key,label]) => { labelToKey[label] = key; });
+/* ---------- Auditoría: exportar y archivar ---------- */
+function buildAuditWorkbook(){
+  const rows = changelog.map(c => ({
+    'FECHA': fmtDateTime(c.ts),
+    'USUARIO': c.user || '',
+    'PROYECTO': c.project || '',
+    'CAMBIO': c.text || '',
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [{ wch:20 },{ wch:26 },{ wch:32 },{ wch:70 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'AUDITORIA');
+  return wb;
+}
 
-      const imported = rows.map((row, i) => {
-        const rec = { id: nextId()+i };
-        Object.entries(row).forEach(([label,val]) => {
-          const key = labelToKey[label];
-          if (!key) return;
-          if (['tuberia','cableado','equipos','avance'].includes(key)){
-            rec[key] = Math.round((Number(val)||0)*100);
-          } else if (val instanceof Date){
-            rec[key] = val.toISOString().slice(0,10);
-          } else {
-            rec[key] = val;
-          }
-        });
-        rec.avance = computeAvance(rec);
-        rec.lastModifiedBy = rec.lastModifiedBy || currentUser.name;
-        rec.lastModifiedAt = new Date().toISOString();
-        return rec;
-      }).filter(r => r.cliente);
+function exportAuditLog(){
+  if (!changelog.length){
+    alert('Todavía no hay registros de auditoría para exportar.');
+    return;
+  }
+  const wb = buildAuditWorkbook();
+  const stamp = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, `Auditoria_Proyectos_DC_${stamp}.xlsx`);
+}
 
-      if (!imported.length){
-        alert('No se encontraron filas reconocibles en el archivo. Verifica que corresponda al formato exportado por esta aplicación.');
-        return;
-      }
-      projects = imported;
-      persistProjects();
-      logChange({ project:'—', text:`Importó ${imported.length} proyectos desde Excel (${file.name}).` });
-      render();
-    } catch(err){
-      console.error(err);
-      alert('No fue posible leer el archivo. Verifica que sea un Excel válido exportado desde esta aplicación.');
-    }
-  };
-  reader.readAsArrayBuffer(file);
-  e.target.value = '';
+async function doArchiveAudit(){
+  const wb = buildAuditWorkbook();
+  const stamp = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, `Auditoria_Proyectos_DC_${stamp}.xlsx`);
+
+  const archivedCount = changelog.length;
+  const archivedByLabel = currentUser.name;
+  changelog = [{
+    ts: new Date().toISOString(),
+    user: archivedByLabel,
+    project: '—',
+    text: `Archivó y reinició el historial (${archivedCount} registro(s) exportados a Excel antes de reiniciar).`,
+  }];
+  await persistChangelog();
+  pendingArchiveAudit = false;
+  render();
 }
 
 /* ---------- Actualización automática silenciosa (cada 30s) ---------- */

@@ -191,6 +191,16 @@ textarea{ resize:vertical; }
 .chart-title{ font-size:14px; font-weight:700; margin-bottom:12px; }
 .chart-error{ color:var(--danger); font-size:12px; margin-top:8px; }
 
+/* Contenedores de altura fija para que los gráficos de barras se vean más
+   compactos tanto en PC como en móvil (antes crecían con el ancho de la
+   pantalla y quedaban demasiado altos). */
+.chart-canvas-box{ position:relative; height:220px; }
+.chart-canvas-box-lg{ position:relative; height:260px; }
+@media (max-width:640px){
+  .chart-canvas-box{ height:170px; }
+  .chart-canvas-box-lg{ height:200px; }
+}
+
 @media (max-width: 900px){
   .panel-row{ grid-template-columns:1fr; }
 }
@@ -198,6 +208,7 @@ textarea{ resize:vertical; }
 .mini-log{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; max-height:240px; overflow-y:auto; }
 .mini-log li{ font-size:12.5px; display:flex; flex-wrap:wrap; gap:6px; border-bottom:1px solid var(--line); padding-bottom:8px; }
 .mini-log-user{ font-weight:700; }
+.mini-log-project{ background:#F2F1EA; color:var(--charcoal); font-weight:600; padding:1px 8px; border-radius:10px; font-size:11.5px; }
 .mini-log-text{ color:var(--charcoal); flex:1; }
 .mini-log-time{ color:var(--muted); font-size:11px; width:100%; }
 .mini-log-empty{ color:var(--muted); }
@@ -378,6 +389,7 @@ let currentUser = null;
 let projects = [];
 let users = [];
 let changelog = [];
+let loadError = false; // true si la última carga no pudo confirmar los datos guardados (ver loadAll/refreshData)
 let activeTab = 'resumen';
 let filters = { estado: new Set(), contratista:'', ciudad:'', coordinador:'', search:'' };
 let modalState = null; // { id: number|null, draft: {...} }
@@ -392,6 +404,10 @@ let userActionError = '';
 let userActionNotice = null; // { title, body } shown after create/reset
 let isRefreshing = false;
 let analisisPeriod = 'todos'; // 'todos' | 'semana' | 'quincena' | 'mes'
+// Pestañas que solo existen para administradores: si el rol de la persona
+// cambia (o se restaura una sesión) mientras está en una de estas, la
+// devolvemos a "Resumen" para que no quede en una pantalla sin acceso.
+const ADMIN_ONLY_TABS = ['analisis','auditoria','usuarios'];
 
 const root = document.getElementById('root');
 
@@ -434,6 +450,15 @@ function uniqueValues(key){
 // Semanas de lunes a domingo, calculadas con la fecha real del navegador.
 function parseDateSafe(v){
   if (!v) return null;
+  // Las fechas de solo calendario ("2026-08-25") se interpretan como UTC
+  // por el motor de JavaScript. En husos horarios negativos como el de
+  // Colombia (UTC-5) eso hacía que, al normalizar a medianoche LOCAL, la
+  // fecha se corriera un día hacia atrás (una fecha de un lunes terminaba
+  // contándose en la semana anterior). Por eso estas fechas se arman aquí
+  // manualmente en hora local, y solo se usa el parseo genérico para los
+  // campos que sí traen fecha y hora completas (por ejemplo lastModifiedAt).
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v).trim());
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
   const d = new Date(v);
   return isNaN(d) ? null : d;
 }
@@ -513,11 +538,26 @@ function countEstadosInRange(start, end){
 }
 
 /* ---------- Almacenamiento persistente (window.storage) ---------- */
+// storageGet ya NO devuelve solo el valor: devuelve { ok, value }.
+// window.storage.get() lanza una excepción tanto si la clave nunca ha
+// existido (primer uso normal) como si hubo un error real de lectura. Antes
+// no distinguíamos esos dos casos, así que un error real se trataba como
+// "todavía no hay datos" y el código reescribía el almacenamiento con los
+// valores por defecto, BORRANDO usuarios/proyectos ya creados. Ahora
+// marcamos ok:false cuando la lectura falla, y quien llama a esta función
+// NO debe sobrescribir el almacenamiento en ese caso — la persona puede
+// reintentar manualmente con el botón "Reintentar" que aparece en pantalla.
+// (Nota: aquí NO se reintenta automáticamente en ráfaga porque eso puede
+// disparar el límite de solicitudes del almacenamiento y causar más fallas
+// de las que resuelve.)
 async function storageGet(key){
   try{
     const r = await window.storage.get(key, true);
-    return r ? JSON.parse(r.value) : null;
-  }catch(e){ return null; }
+    return { ok: true, value: r ? JSON.parse(r.value) : null };
+  }catch(e){
+    console.error('storage get failed', key, e);
+    return { ok: false, value: null, error: e };
+  }
 }
 async function storageSet(key, value){
   try{
@@ -527,14 +567,37 @@ async function storageSet(key, value){
 }
 
 async function loadAll(){
-  const [p, u, c] = await Promise.all([
+  const [pRes, uRes, cRes] = await Promise.all([
     storageGet('sy_dc_projects'),
     storageGet('sy_dc_users'),
     storageGet('sy_dc_changelog'),
   ]);
 
-  if (p && Array.isArray(p) && p.length){
-    projects = p;
+  // "Marca de inicialización": una vez que la app ha sembrado los datos
+  // por defecto una vez, esta clave queda en true para siempre. Si en una
+  // carga futura la lectura de usuarios/proyectos falla (uRes.ok === false
+  // o pRes.ok === false) pero la marca ya existe, sabemos que SÍ debería
+  // haber datos reales guardados — así que no los reemplazamos por los
+  // valores por defecto; mostramos un aviso y dejamos que la persona
+  // reintente, en vez de borrar silenciosamente su información.
+  // Solo se consulta esta marca cuando realmente hace falta (proyectos o
+  // usuarios llegaron vacíos o fallaron), para no sumar una llamada extra
+  // de almacenamiento en cada carga normal.
+  const projectsNeedDecision = !(pRes.value && Array.isArray(pRes.value) && pRes.value.length);
+  const usersNeedDecision = !(uRes.value && Array.isArray(uRes.value) && uRes.value.length);
+  let alreadyInitialized = false;
+  if (projectsNeedDecision || usersNeedDecision){
+    const initRes = await storageGet('sy_dc_initialized');
+    alreadyInitialized = initRes.ok && initRes.value === true;
+  }
+  loadError = false;
+
+  if (pRes.value && Array.isArray(pRes.value) && pRes.value.length){
+    projects = pRes.value;
+  } else if (!pRes.ok && alreadyInitialized){
+    // Falló la lectura y ya sabíamos que había datos: no los borramos.
+    projects = projects && projects.length ? projects : [];
+    loadError = true;
   } else {
     projects = SEED_PROJECTS.map(sp => ({
       ...sp,
@@ -548,12 +611,20 @@ async function loadAll(){
     await storageSet('sy_dc_projects', projects);
   }
 
-  if (u && Array.isArray(u) && u.length){
-    users = u;
+  let seededDefaults = false;
+
+  if (uRes.value && Array.isArray(uRes.value) && uRes.value.length){
+    users = uRes.value;
     // Migración: usuarios creados antes de existir roles quedan como 'user'.
     let migrated = false;
     users.forEach(x => { if (!x.role){ x.role = 'user'; migrated = true; } });
     if (migrated) await storageSet('sy_dc_users', users);
+  } else if (!uRes.ok && alreadyInitialized){
+    // Falló la lectura y ya sabíamos que había usuarios: NO los reemplazamos
+    // por la cuenta admin por defecto. Mantenemos lo que hubiera en memoria
+    // (o una lista vacía si es la primera carga de esta pestaña) y avisamos.
+    users = users && users.length ? users : [];
+    loadError = true;
   } else {
     users = [{
       name: 'Andres Felipe Florez',
@@ -563,9 +634,18 @@ async function loadAll(){
       createdAt: new Date().toISOString(),
     }];
     await storageSet('sy_dc_users', users);
+    seededDefaults = true;
   }
 
-  changelog = Array.isArray(c) ? c : [];
+  // La marca de inicialización solo se escribe una vez: cuando de verdad se
+  // acaban de sembrar datos por defecto (primer uso real), o cuando ya
+  // confirmamos (con éxito) que todavía no existía. Así evitamos una
+  // llamada de escritura extra en cada carga normal exitosa.
+  if (seededDefaults || (usersNeedDecision && !alreadyInitialized)){
+    await storageSet('sy_dc_initialized', true);
+  }
+
+  changelog = Array.isArray(cRes.value) ? cRes.value : (cRes.ok ? [] : changelog || []);
 
   // Restaurar sesión activa (si existe) para que la persona no tenga que
   // volver a iniciar sesión cada vez que la app se recarga.
@@ -594,14 +674,18 @@ async function refreshData(){
   isRefreshing = true;
   render();
   try{
-    const [p, u, c] = await Promise.all([
+    const [pRes, uRes, cRes] = await Promise.all([
       storageGet('sy_dc_projects'),
       storageGet('sy_dc_users'),
       storageGet('sy_dc_changelog'),
     ]);
-    if (Array.isArray(p)) projects = p;
-    if (Array.isArray(u)) users = u;
-    if (Array.isArray(c)) changelog = c;
+    // Igual que en loadAll: si la lectura falló (pRes.ok/uRes.ok === false),
+    // NO tocamos projects/users/changelog — así una falla momentánea de red
+    // durante la actualización automática nunca borra datos ya cargados.
+    if (Array.isArray(pRes.value)) projects = pRes.value;
+    if (Array.isArray(uRes.value)) users = uRes.value;
+    if (Array.isArray(cRes.value)) changelog = cRes.value;
+    loadError = !pRes.ok || !uRes.ok || !cRes.ok;
 
     // Si el usuario actual fue editado (rol) o eliminado desde otra sesión,
     // reflejarlo aquí también.
@@ -609,7 +693,7 @@ async function refreshData(){
       const fresh = users.find(x => x.email.toLowerCase() === currentUser.email.toLowerCase());
       if (fresh){
         currentUser = { name: fresh.name, email: fresh.email, role: fresh.role || 'user' };
-        if (currentUser.role !== 'admin' && activeTab === 'usuarios') activeTab = 'resumen';
+        if (currentUser.role !== 'admin' && ADMIN_ONLY_TABS.includes(activeTab)) activeTab = 'resumen';
       } else {
         currentUser = null; authView = 'login';
         await clearSession();
@@ -644,7 +728,7 @@ async function restoreSession(){
 }
 
 function logChange(entry){
-  changelog.unshift({ ts: new Date().toISOString(), user: currentUser ? currentUser.name : 'Sistema', ...entry });
+  changelog.unshift({ ts: new Date().toISOString(), user: currentUser ? currentUser.name : 'Sistema', userEmail: currentUser ? currentUser.email : null, ...entry });
   // El historial ya NO se recorta automáticamente: todos los registros
   // permanecen disponibles para consulta en cualquier momento. Solo se limita
   // a un tope muy alto (20.000 registros) como salvaguarda técnica del
@@ -722,6 +806,12 @@ function renderApp(){
       <div class="app-body">
         ${renderTabs()}
         <div class="tab-content">
+          ${loadError ? `
+            <div class="auth-error" style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px">
+              <span>No se pudo confirmar la última información guardada (posible falla de conexión). Para tu seguridad no se sobrescribió ni se borró nada — solo falta volver a intentar.</span>
+              <button class="btn btn-text" data-action="retry-load" style="white-space:nowrap">Reintentar</button>
+            </div>
+          ` : ''}
           ${activeTab==='resumen' ? renderResumen() : ''}
           ${activeTab==='proyectos' ? renderProyectos() : ''}
           ${activeTab==='analisis' ? renderAnalisis() : ''}
@@ -754,6 +844,7 @@ function renderTopbar(){
         <span class="topbar-user-email">${esc(currentUser.email)}</span>
       </div>
       <button class="btn btn-ghost-yellow" data-action="refresh-data" title="La app también se actualiza sola cada 30 segundos" ${isRefreshing ? 'disabled' : ''}>${isRefreshing ? 'Actualizando…' : '⟳ Actualizar'}</button>
+      <button class="btn btn-ghost-yellow" data-action="open-change-password">Cambiar contraseña</button>
       <button class="btn btn-ghost-yellow" data-action="logout">Salir</button>
     </div>
   </header>`;
@@ -763,10 +854,9 @@ function renderTabs(){
   const tabs = [
     ['resumen','Resumen'],
     ['proyectos','Proyectos'],
-    ['analisis','Análisis'],
-    ['auditoria','Auditoría'],
   ];
-  if (currentUser.role === 'admin') tabs.push(['usuarios','Usuarios']);
+  // Análisis, Auditoría y Usuarios quedan reservadas al perfil administrador.
+  if (currentUser.role === 'admin') tabs.push(['analisis','Análisis'], ['auditoria','Auditoría'], ['usuarios','Usuarios']);
   return `<nav class="tabs">
     ${tabs.map(([k,l])=>`<button class="tab-btn ${activeTab===k?'active':''}" data-action="set-tab" data-tab="${k}">${l}</button>`).join('')}
   </nav>`;
@@ -777,6 +867,12 @@ function renderResumen(){
   const total = projects.length;
   const avgAvance = total ? Math.round(projects.reduce((s,p)=>s+computeAvance(p),0)/total) : 0;
   const kpis = STATUSES.map(st => ({ st, count: projects.filter(p=>p.estado===st).length }));
+
+  // Un perfil de usuario (no administrador) solo debe ver en "Últimas
+  // actualizaciones" los cambios que él mismo realizó, no los de los demás.
+  const visibleChangelog = currentUser.role === 'admin'
+    ? changelog
+    : changelog.filter(c => c.userEmail ? c.userEmail === currentUser.email : c.user === currentUser.name);
 
   return `
     <section class="panel">
@@ -799,12 +895,13 @@ function renderResumen(){
         <div class="chart-box chart-box-wide">
           <h3 class="chart-title">Últimas actualizaciones</h3>
           <ul class="mini-log">
-            ${changelog.slice(0,8).map(c => `
+            ${visibleChangelog.slice(0,8).map(c => `
               <li>
                 <span class="mini-log-user">${esc(c.user)}</span>
+                ${c.project && c.project !== '—' ? `<span class="mini-log-project">${esc(c.project)}</span>` : ''}
                 <span class="mini-log-text">${esc(c.text)}</span>
                 <span class="mini-log-time">${fmtDateTime(c.ts)}</span>
-              </li>`).join('') || '<li class="mini-log-empty">Aún no hay cambios registrados.</li>'}
+              </li>`).join('') || `<li class="mini-log-empty">${currentUser.role === 'admin' ? 'Aún no hay cambios registrados.' : 'Todavía no has realizado cambios.'}</li>`}
           </ul>
         </div>
       </div>
@@ -926,18 +1023,24 @@ function renderAnalisis(){
 
   const weeklyRows = buckets.map((b,i) => `
     <tr${b.isCurrent ? ' style="background:#FDFBEF"' : ''}>
-      <td class="cell-strong">${esc(b.label)}${b.isCurrent ? ' <span class="cell-sub">(actual)</span>' : ''}</td>
+      <td class="cell-strong">${esc(b.label)}${b.isCurrent ? ' <span class="cell-sub">(semana en curso)</span>' : ''}</td>
       <td>${facturadas[i]} ${deltaCell(facturadas,i)}</td>
       <td>${ocRecibida[i]} ${deltaCell(ocRecibida,i)}</td>
       <td>${recaudadas[i]} ${deltaCell(recaudadas,i)}</td>
     </tr>
   `).join('');
 
+  const cityCount = uniqueValues('ciudad').length;
+  const cityChartHeight = Math.max(280, cityCount * 26);
+  const contratistaCount = uniqueValues('contratista').length;
+  const contratistaChartHeight = Math.max(200, contratistaCount * 22);
+
   return `
     <section class="panel">
       <div>
         <h3 class="chart-title" style="margin-bottom:2px">Comparativo semanal (lunes a domingo)</h3>
-        <p class="auth-note" style="margin-bottom:16px">Con base en las fechas reales registradas en cada proyecto: emisión de factura, recepción de OC y facturación de recaudo.</p>
+        <p class="auth-note" style="margin-bottom:4px">Con base en las fechas reales registradas en cada proyecto: emisión de factura, recepción de OC y facturación de recaudo.</p>
+        <p class="auth-note" style="margin-bottom:16px">La <strong>semana en curso</strong> todavía no ha terminado, así que su total puede verse más bajo solo porque faltan días por contar — no lo interpretes todavía como una caída frente a la semana anterior.</p>
         <div class="kpi-row">
           ${kpi('Tiendas facturadas', facturadas)}
           ${kpi('Tiendas con OC recibida', ocRecibida)}
@@ -948,28 +1051,20 @@ function renderAnalisis(){
       <div class="panel-row">
         <div class="chart-box chart-box-wide">
           <h3 class="chart-title">Facturación, OC y recaudo — últimas ${WEEKS_BACK} semanas</h3>
-          <canvas id="chartSemanal" height="220"></canvas>
+          <div class="chart-canvas-box-lg">
+            <canvas id="chartSemanal"></canvas>
+          </div>
         </div>
       </div>
 
       <div>
         <h3 class="chart-title" style="margin-bottom:8px">Detalle semana a semana</h3>
+        <p class="auth-note" style="margin-bottom:10px">Cada fila es una semana de lunes a domingo. La columna de la derecha de cada dato (▲/▼) compara esa semana contra la inmediatamente anterior; la semana en curso aún está incompleta.</p>
         <div class="table-wrap">
           <table class="data-table">
             <thead><tr><th>Semana</th><th>Tiendas facturadas</th><th>Tiendas con OC recibida</th><th>Tiendas recaudadas</th></tr></thead>
             <tbody>${weeklyRows}</tbody>
           </table>
-        </div>
-      </div>
-
-      <div class="panel-row">
-        <div class="chart-box">
-          <h3 class="chart-title">Distribución por tipo de ciudad</h3>
-          <canvas id="chartTipoCiudad" height="240"></canvas>
-        </div>
-        <div class="chart-box">
-          <h3 class="chart-title">Avance promedio por contratista</h3>
-          <canvas id="chartContratista" height="240"></canvas>
         </div>
       </div>
 
@@ -987,20 +1082,29 @@ function renderAnalisis(){
 
       <div class="panel-row">
         <div class="chart-box chart-box-wide">
-          <canvas id="chartEstado" height="240"></canvas>
+          <div class="chart-canvas-box">
+            <canvas id="chartEstado"></canvas>
+          </div>
         </div>
       </div>
 
       <div class="panel-row">
-        <div class="chart-box">
+        <div class="chart-box chart-box-wide">
           <h3 class="chart-title">Proyectos por ciudad</h3>
-          <p class="auth-note" style="margin-bottom:10px">Total acumulado de proyectos abiertos en cada ciudad, para ver dónde ha habido más apertura de tiendas.</p>
-          <canvas id="chartCiudad" height="240"></canvas>
+          <p class="auth-note" style="margin-bottom:10px">Total acumulado de proyectos abiertos en cada ciudad (${cityCount} ciudades), para ver dónde ha habido más apertura de tiendas.</p>
+          <div style="height:${cityChartHeight}px">
+            <canvas id="chartCiudad"></canvas>
+          </div>
         </div>
-        <div class="chart-box">
+      </div>
+
+      <div class="panel-row">
+        <div class="chart-box chart-box-wide">
           <h3 class="chart-title">Proyectos por contratista (cantidad)</h3>
           <p class="auth-note" style="margin-bottom:10px">Total acumulado de proyectos que ha desarrollado cada contratista.</p>
-          <canvas id="chartContratistaCount" height="240"></canvas>
+          <div style="height:${contratistaChartHeight}px">
+            <canvas id="chartContratistaCount"></canvas>
+          </div>
         </div>
       </div>
     </section>
@@ -1091,10 +1195,10 @@ function renderUsuarios(){
 }
 
 function renderUserModal(){
-  const mode = userModalState.mode; // 'new' | 'reset' | 'edit'
-  const titles = { new:'Nueva persona', reset:'Restablecer contraseña', edit:'Editar persona' };
-  const submitActions = { new:'do-create-user', reset:'do-reset-user', edit:'do-edit-user' };
-  const submitLabels = { new:'Crear persona', reset:'Restablecer contraseña', edit:'Guardar cambios' };
+  const mode = userModalState.mode; // 'new' | 'reset' | 'edit' | 'self'
+  const titles = { new:'Nueva persona', reset:'Restablecer contraseña', edit:'Editar persona', self:'Cambiar mi contraseña' };
+  const submitActions = { new:'do-create-user', reset:'do-reset-user', edit:'do-edit-user', self:'do-change-own-password' };
+  const submitLabels = { new:'Crear persona', reset:'Restablecer contraseña', edit:'Guardar cambios', self:'Cambiar contraseña' };
   const editingUser = mode !== 'new' ? users.find(u => u.email === userModalState.email) : null;
 
   return `
@@ -1145,6 +1249,18 @@ function renderUserModal(){
           <div class="field">
             <label>Nueva contraseña temporal</label>
             <input type="text" name="password" minlength="6" required placeholder="Mínimo 6 caracteres" />
+          </div>
+        ` : ''}
+
+        ${mode === 'self' ? `
+          <p class="auth-note">Cambia la contraseña que se te asignó inicialmente por una nueva que solo tú conozcas.</p>
+          <div class="field">
+            <label>Contraseña actual</label>
+            <input type="password" name="currentPassword" required />
+          </div>
+          <div class="field">
+            <label>Nueva contraseña</label>
+            <input type="text" name="newPassword" minlength="6" required placeholder="Mínimo 6 caracteres" />
           </div>
         ` : ''}
 
@@ -1294,8 +1410,6 @@ function destroyCharts(){
 
 function buildCharts(){
   destroyCharts();
-  const palette = ['#141414','#F6D500','#3B7DD8','#2E9E5B','#E08A2C','#7A5FC0','#1B7F8C','#8c8c86'];
-
   // Si por cualquier motivo la librería de gráficos no cargó (por ejemplo, sin
   // conexión a internet o un bloqueo de red), lo mostramos de forma visible en
   // cada recuadro en vez de dejarlo en blanco sin explicación.
@@ -1332,6 +1446,7 @@ function buildCharts(){
       },
       options:{
         responsive:true,
+        maintainAspectRatio:false,
         plugins:{ legend:{ position:'bottom', labels:{ font:{ family:'Inter' } } } },
         scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } }
       }
@@ -1346,7 +1461,7 @@ function buildCharts(){
       safeChart(elEstado, 'estado', {
         type:'bar',
         data:{ labels: STATUSES, datasets:[{ label:'Total', data: STATUSES.map(st=>projects.filter(p=>p.estado===st).length), backgroundColor: STATUSES.map(st=>STATUS_COLORS[st]) }] },
-        options: baseBarOptions()
+        options: { ...baseBarOptions(), maintainAspectRatio:false }
       });
     } else {
       const current = countEstadosInRange(range.currentStart, range.currentEnd);
@@ -1362,6 +1477,7 @@ function buildCharts(){
         },
         options:{
           responsive:true,
+          maintainAspectRatio:false,
           plugins:{ legend:{ display:true, position:'bottom', labels:{ font:{ family:'Inter' } } } },
           scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } }
         }
@@ -1369,32 +1485,11 @@ function buildCharts(){
     }
   }
 
-  const elTipo = document.getElementById('chartTipoCiudad');
-  if (elTipo){
-    const tipos = uniqueValues('tipoCiudad');
-    safeChart(elTipo, 'tipoCiudad', {
-      type:'doughnut',
-      data:{ labels: tipos, datasets:[{ data: tipos.map(t=>projects.filter(p=>p.tipoCiudad===t).length), backgroundColor: tipos.map((_,i)=>palette[i%palette.length]) }] },
-      options:{ responsive:true, plugins:{ legend:{ position:'bottom', labels:{ font:{ family:'Inter' } } } } }
-    });
-  }
-
-  const elContratista = document.getElementById('chartContratista');
-  if (elContratista){
-    const contratistas = uniqueValues('contratista');
-    const avgs = contratistas.map(c => {
-      const items = projects.filter(p=>p.contratista===c);
-      return Math.round(items.reduce((s,p)=>s+computeAvance(p),0)/items.length);
-    });
-    safeChart(elContratista, 'contratista', {
-      type:'bar',
-      data:{ labels: contratistas, datasets:[{ label:'Avance promedio %', data: avgs, backgroundColor:'#F6D500' }] },
-      options:{ ...baseBarOptions(), indexAxis:'y' }
-    });
-  }
-
   // Ciudad y contratista: totales ACUMULADOS de todos los proyectos (no se
   // filtran por el selector de periodo), ordenados de mayor a menor cantidad.
+  // El de ciudad se dibuja horizontal y dentro de un contenedor cuya altura
+  // ya se calculó en renderAnalisis() según el número de ciudades, para que
+  // todas queden visibles sin apretarse ni recortarse.
   const elCiudad = document.getElementById('chartCiudad');
   if (elCiudad){
     const ciudades = uniqueValues('ciudad');
@@ -1404,7 +1499,13 @@ function buildCharts(){
     safeChart(elCiudad, 'ciudad', {
       type:'bar',
       data:{ labels: paired.map(p=>p.c), datasets:[{ label:'Proyectos', data: paired.map(p=>p.n), backgroundColor:'#3B7DD8' }] },
-      options:{ ...baseBarOptions(), indexAxis: paired.length > 8 ? 'y' : 'x' }
+      options:{
+        responsive:true,
+        maintainAspectRatio:false,
+        indexAxis:'y',
+        plugins:{ legend:{ display:false } },
+        scales:{ x:{ beginAtZero:true, ticks:{ precision:0 } } }
+      }
     });
   }
 
@@ -1417,7 +1518,7 @@ function buildCharts(){
     safeChart(elContratistaCount, 'contratistaCount', {
       type:'bar',
       data:{ labels: paired.map(p=>p.c), datasets:[{ label:'Proyectos', data: paired.map(p=>p.n), backgroundColor:'#7A5FC0' }] },
-      options:{ ...baseBarOptions(), indexAxis:'y' }
+      options:{ ...baseBarOptions(), maintainAspectRatio:false, indexAxis:'y' }
     });
   }
 }
@@ -1463,7 +1564,12 @@ function onRootClick(e){
   switch(action){
     case 'show-login': authView='login'; authError=''; render(); break;
     case 'refresh-data': refreshData(); break;
+    case 'open-change-password':
+      userActionError = ''; userActionNotice = null;
+      userModalState = { mode:'self', email: currentUser.email, draft:{} };
+      render(); break;
     case 'logout': currentUser=null; authView='login'; clearSession(); render(); break;
+    case 'retry-load': refreshData(); break;
     case 'set-tab': activeTab = btn.dataset.tab; render(); break;
     case 'open-new-project':
       modalState = { id: null, draft: { id: nextId(), tuberia:0, cableado:0, equipos:0 } };
@@ -1577,6 +1683,7 @@ function onRootSubmit(e){
   if (action === 'do-create-user') return doCreateUser(fd);
   if (action === 'do-reset-user') return doResetUser(fd);
   if (action === 'do-edit-user') return doEditUser(fd);
+  if (action === 'do-change-own-password') return doChangeOwnPassword(fd);
 }
 
 /* ---------- Lógica de autenticación ---------- */
@@ -1675,6 +1782,29 @@ async function doEditUser(fd){
   render();
 }
 
+// Permite que cualquier persona (usuario o administrador) cambie la
+// contraseña con la que inició sesión, sin depender de un administrador.
+async function doChangeOwnPassword(fd){
+  const currentPassword = String(fd.get('currentPassword'));
+  const newPassword = String(fd.get('newPassword'));
+  const user = users.find(u => u.email === currentUser.email);
+  if (!user){ userModalState = null; render(); return; }
+  if (user.passHash !== simpleHash(currentPassword)){
+    userActionError = 'La contraseña actual no es correcta.';
+    render(); return;
+  }
+  if (newPassword.length < 6){
+    userActionError = 'La nueva contraseña debe tener al menos 6 caracteres.';
+    render(); return;
+  }
+  user.passHash = simpleHash(newPassword);
+  await persistUsers();
+  logChange({ project:'—', text:'Cambió su propia contraseña.' });
+  userModalState = null;
+  render();
+  alert('Tu contraseña se actualizó correctamente.');
+}
+
 async function toggleUserRole(email){
   const user = users.find(u => u.email === email);
   if (!user) return;
@@ -1687,7 +1817,7 @@ async function toggleUserRole(email){
   logChange({ project:'—', text:`Cambió el rol de ${user.name} (${user.email}) a ${user.role==='admin'?'administrador':'usuario'}.` });
   if (currentUser && currentUser.email === user.email){
     currentUser.role = user.role;
-    if (user.role !== 'admin' && activeTab === 'usuarios') activeTab = 'resumen';
+    if (user.role !== 'admin' && ADMIN_ONLY_TABS.includes(activeTab)) activeTab = 'resumen';
   }
   render();
 }
@@ -1855,20 +1985,22 @@ async function silentAutoRefresh(){
   if (isRefreshing || !currentUser || isUserCurrentlyEditing()) return;
   isRefreshing = true;
   try{
-    const [p, u, c] = await Promise.all([
+    const [pRes, uRes, cRes] = await Promise.all([
       storageGet('sy_dc_projects'),
       storageGet('sy_dc_users'),
       storageGet('sy_dc_changelog'),
     ]);
-    if (Array.isArray(p)) projects = p;
-    if (Array.isArray(u)) users = u;
-    if (Array.isArray(c)) changelog = c;
+    // Solo sobrescribimos si la lectura trajo datos reales; si falló, se
+    // conserva lo que ya había en memoria (nunca se borra por una falla).
+    if (Array.isArray(pRes.value)) projects = pRes.value;
+    if (Array.isArray(uRes.value)) users = uRes.value;
+    if (Array.isArray(cRes.value)) changelog = cRes.value;
 
     if (currentUser){
       const fresh = users.find(x => x.email.toLowerCase() === currentUser.email.toLowerCase());
       if (fresh){
         currentUser = { name: fresh.name, email: fresh.email, role: fresh.role || 'user' };
-        if (currentUser.role !== 'admin' && activeTab === 'usuarios') activeTab = 'resumen';
+        if (currentUser.role !== 'admin' && ADMIN_ONLY_TABS.includes(activeTab)) activeTab = 'resumen';
       } else {
         currentUser = null; authView = 'login';
         await clearSession();

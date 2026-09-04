@@ -298,9 +298,10 @@ textarea{ resize:vertical; }
 @media (max-width:600px){ .form-grid{ grid-template-columns:1fr; } }
 
 .progress-editor{ display:flex; flex-direction:column; gap:14px; }
-.progress-editor-row{ display:grid; grid-template-columns:90px 1fr 48px; align-items:center; gap:12px; }
+.progress-editor-row{ display:grid; grid-template-columns:90px 1fr 64px 48px; align-items:center; gap:12px; }
 .progress-editor-row label{ font-size:13px; font-weight:600; }
 .progress-editor-value{ font-size:13px; font-weight:700; text-align:right; }
+.progress-editor-number{ width:64px; padding:6px 8px; border:1px solid var(--line); border-radius:8px; font-size:13px; text-align:right; background:var(--paper); color:var(--ink); }
 .progress-editor-total{ display:grid; grid-template-columns:90px 1fr 48px; align-items:center; gap:12px; padding-top:8px; border-top:1px dashed var(--line); }
 .progress-editor-total label{ font-size:13px; font-weight:700; }
 input[type=range]{ accent-color:var(--black); }
@@ -407,10 +408,17 @@ let userActionError = '';
 let userActionNotice = null; // { title, body } shown after create/reset
 let isRefreshing = false;
 let analisisPeriod = 'todos'; // 'todos' | 'semana' | 'quincena' | 'mes'
-// Pestañas que solo existen para administradores: si el rol de la persona
-// cambia (o se restaura una sesión) mientras está en una de estas, la
+// Pestañas que NO existen para el perfil "usuario" básico: si el rol de la
+// persona cambia (o se restaura una sesión) mientras está en una de estas, la
 // devolvemos a "Resumen" para que no quede en una pantalla sin acceso.
+// Administrador y supervisor sí pueden verlas (el supervisor con permisos
+// reducidos dentro de cada una — ver canSeeAdminTabs).
 const ADMIN_ONLY_TABS = ['analisis','auditoria','usuarios'];
+// Administrador y supervisor comparten acceso de VISUALIZACIÓN a Análisis,
+// Auditoría y Usuarios. Las acciones que modifican datos (editar/eliminar
+// proyectos, archivar auditoría, gestionar usuarios) siguen exclusivas de
+// 'admin' y se validan aparte en cada pantalla/acción.
+function canSeeAdminTabs(role){ return role === 'admin' || role === 'supervisor'; }
 
 const root = document.getElementById('root');
 
@@ -727,7 +735,7 @@ async function refreshData(){
       const fresh = users.find(x => x.email.toLowerCase() === currentUser.email.toLowerCase());
       if (fresh){
         currentUser = { name: fresh.name, email: fresh.email, role: fresh.role || 'user' };
-        if (currentUser.role !== 'admin' && ADMIN_ONLY_TABS.includes(activeTab)) activeTab = 'resumen';
+        if (!canSeeAdminTabs(currentUser.role) && ADMIN_ONLY_TABS.includes(activeTab)) activeTab = 'resumen';
       } else {
         currentUser = null; authView = 'login';
         await clearSession();
@@ -877,7 +885,6 @@ function renderTopbar(){
         <span class="topbar-user-name">${esc(currentUser.name)}</span>
         <span class="topbar-user-email">${esc(currentUser.email)}</span>
       </div>
-      <button class="btn btn-ghost-yellow" data-action="refresh-data" title="La app también se actualiza sola cada 30 segundos" ${isRefreshing ? 'disabled' : ''}>${isRefreshing ? 'Actualizando…' : '⟳ Actualizar'}</button>
       <button class="btn btn-ghost-yellow" data-action="open-change-password">Cambiar contraseña</button>
       <button class="btn btn-ghost-yellow" data-action="logout">Salir</button>
     </div>
@@ -890,7 +897,7 @@ function renderTabs(){
     ['proyectos','Proyectos'],
   ];
   // Análisis, Auditoría y Usuarios quedan reservadas al perfil administrador.
-  if (currentUser.role === 'admin') tabs.push(['analisis','Análisis'], ['auditoria','Auditoría'], ['usuarios','Usuarios']);
+  if (canSeeAdminTabs(currentUser.role)) tabs.push(['analisis','Análisis'], ['auditoria','Auditoría'], ['usuarios','Usuarios']);
   return `<nav class="tabs">
     ${tabs.map(([k,l])=>`<button class="tab-btn ${activeTab===k?'active':''}" data-action="set-tab" data-tab="${k}">${l}</button>`).join('')}
   </nav>`;
@@ -904,7 +911,7 @@ function renderResumen(){
 
   // Un perfil de usuario (no administrador) solo debe ver en "Últimas
   // actualizaciones" los cambios que él mismo realizó, no los de los demás.
-  const visibleChangelog = currentUser.role === 'admin'
+  const visibleChangelog = canSeeAdminTabs(currentUser.role)
     ? changelog
     : changelog.filter(c => c.userEmail ? c.userEmail === currentUser.email : c.user === currentUser.name);
 
@@ -935,7 +942,7 @@ function renderResumen(){
                 ${c.project && c.project !== '—' ? `<span class="mini-log-project">${esc(c.project)}</span>` : ''}
                 <span class="mini-log-text">${esc(c.text)}</span>
                 <span class="mini-log-time">${fmtDateTime(c.ts)}</span>
-              </li>`).join('') || `<li class="mini-log-empty">${currentUser.role === 'admin' ? 'Aún no hay cambios registrados.' : 'Todavía no has realizado cambios.'}</li>`}
+              </li>`).join('') || `<li class="mini-log-empty">${canSeeAdminTabs(currentUser.role) ? 'Aún no hay cambios registrados.' : 'Todavía no has realizado cambios.'}</li>`}
           </ul>
         </div>
       </div>
@@ -983,6 +990,23 @@ function renderProyectos(){
         `).join('')}
       </div>
 
+      <div id="proyectosResultsWrap">
+        ${renderProyectosResults(list)}
+      </div>
+    </section>
+  `;
+}
+
+// Extraído aparte para poder refrescar SOLO la tabla de resultados (no el
+// buscador ni los selects) cada vez que la persona escribe en el buscador.
+// Antes, cada tecla reconstruía todo el <section> — incluido el <input> — y
+// eso destruía y recreaba el campo de texto en cada pulsación; en equipos de
+// escritorio, donde el tecleo es más rápido que en móvil, el navegador
+// perdía pulsaciones porque el input dejaba de existir por una fracción de
+// segundo. Al limitar el refresco a esta franja, el <input> nunca se toca.
+function renderProyectosResults(list){
+  const currentSupervisorView = currentUser && currentUser.role === 'supervisor';
+  return `
       <div class="table-wrap">
         <table class="data-table">
           <thead>
@@ -1010,8 +1034,10 @@ function renderProyectos(){
                   ${esc(p.lastModifiedBy||'—')}<br/>${p.lastModifiedAt ? fmtDateTime(p.lastModifiedAt) : ''}
                 </td>
                 <td class="cell-actions">
-                  <button class="btn btn-text" data-action="open-edit-project" data-id="${p.id}">Editar</button>
-                  <button class="btn btn-text btn-text-danger" data-action="confirm-delete" data-id="${p.id}">Eliminar</button>
+                  ${currentSupervisorView
+                    ? `<button class="btn btn-text" data-action="open-view-project" data-id="${p.id}">Ver</button>`
+                    : `<button class="btn btn-text" data-action="open-edit-project" data-id="${p.id}">Editar</button>
+                  <button class="btn btn-text btn-text-danger" data-action="confirm-delete" data-id="${p.id}">Eliminar</button>`}
                 </td>
               </tr>
             `).join('') || `<tr><td colspan="8" class="empty-row">No hay proyectos que coincidan con los filtros seleccionados.</td></tr>`}
@@ -1019,7 +1045,6 @@ function renderProyectos(){
         </table>
       </div>
       <div class="table-footnote">${list.length} de ${projects.length} proyectos</div>
-    </section>
   `;
 }
 
@@ -1179,21 +1204,38 @@ function renderAuditoria(){
   `;
 }
 
-/* ----- USUARIOS (solo administradores) ----- */
+/* ----- USUARIOS ----- */
+// Administrador: control total (crear, editar, restablecer clave, eliminar).
+// Supervisor: solo puede CONSULTAR quiénes están registrados y con qué rol;
+// no ve botones de acción y no puede crear personas nuevas.
+function roleLabel(role){
+  if (role === 'admin') return 'Administrador';
+  if (role === 'supervisor') return 'Supervisor';
+  return 'Usuario';
+}
+function roleChipColor(role){
+  if (role === 'admin') return '#141414';
+  if (role === 'supervisor') return '#1d5c4a';
+  return '#8c8c86';
+}
 function renderUsuarios(){
+  const isAdmin = currentUser.role === 'admin';
   return `
     <section class="panel">
       <div class="toolbar">
         <div>
           <h3 class="chart-title" style="margin-bottom:2px">Personas con acceso a la plataforma</h3>
-          <p class="auth-note">Aquí ves todas las personas registradas en el sistema: puedes crear cuentas, editar sus datos, restablecer una contraseña olvidada, cambiar su rol o quitarles el acceso.</p>
+          <p class="auth-note">${isAdmin
+            ? 'Aquí ves todas las personas registradas en el sistema: puedes crear cuentas, editar sus datos, restablecer una contraseña olvidada, cambiar su rol o quitarles el acceso.'
+            : 'Aquí puedes consultar qué personas están registradas y con qué rol. Crear cuentas, editar, restablecer contraseñas o eliminar accesos es exclusivo del perfil administrador.'}</p>
         </div>
+        ${isAdmin ? `
         <div class="toolbar-right">
           <button class="btn btn-primary" data-action="open-new-user">+ Nueva persona</button>
-        </div>
+        </div>` : ''}
       </div>
 
-      ${userActionNotice ? `
+      ${userActionNotice && isAdmin ? `
         <div class="auth-simulated-email">
           <div class="auth-simulated-email-label">${esc(userActionNotice.title)}</div>
           <div class="auth-simulated-email-code">${esc(userActionNotice.code)}</div>
@@ -1204,20 +1246,20 @@ function renderUsuarios(){
 
       <div class="table-wrap">
         <table class="data-table">
-          <thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Creado</th><th></th></tr></thead>
+          <thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Creado</th>${isAdmin ? '<th></th>' : ''}</tr></thead>
           <tbody>
             ${users.map(u => `
               <tr>
                 <td class="cell-strong">${esc(u.name)}</td>
                 <td>${esc(u.email)}</td>
-                <td><span class="status-pill" style="--chip-color:${u.role==='admin' ? '#141414' : '#8c8c86'}">${u.role==='admin' ? 'Administrador' : 'Usuario'}</span></td>
+                <td><span class="status-pill" style="--chip-color:${roleChipColor(u.role)}">${roleLabel(u.role)}</span></td>
                 <td class="cell-sub">${u.createdAt ? fmtDateTime(u.createdAt) : '—'}</td>
+                ${isAdmin ? `
                 <td class="cell-actions">
                   <button class="btn btn-text" data-action="open-edit-user" data-email="${esc(u.email)}">Editar</button>
                   <button class="btn btn-text" data-action="open-reset-user" data-email="${esc(u.email)}">Restablecer contraseña</button>
-                  <button class="btn btn-text" data-action="toggle-user-role" data-email="${esc(u.email)}">${u.role==='admin' ? 'Quitar admin' : 'Hacer admin'}</button>
                   <button class="btn btn-text btn-text-danger" data-action="confirm-delete-user" data-email="${esc(u.email)}">Eliminar</button>
-                </td>
+                </td>` : ''}
               </tr>
             `).join('')}
           </tbody>
@@ -1262,6 +1304,7 @@ function renderUserModal(){
             <label>Rol</label>
             <select name="role">
               <option value="user">Usuario</option>
+              <option value="supervisor">Supervisor</option>
               <option value="admin">Administrador</option>
             </select>
           </div>
@@ -1275,6 +1318,14 @@ function renderUserModal(){
           <div class="field">
             <label>Correo corporativo</label>
             <input type="email" name="email" value="${esc(editingUser ? editingUser.email : '')}" required />
+          </div>
+          <div class="field">
+            <label>Rol</label>
+            <select name="role">
+              <option value="user" ${editingUser && editingUser.role==='user' ? 'selected' : ''}>Usuario</option>
+              <option value="supervisor" ${editingUser && editingUser.role==='supervisor' ? 'selected' : ''}>Supervisor</option>
+              <option value="admin" ${editingUser && editingUser.role==='admin' ? 'selected' : ''}>Administrador</option>
+            </select>
           </div>
         ` : ''}
 
@@ -1329,11 +1380,15 @@ function renderConfirmDeleteUser(){
 function renderModal(){
   const d = modalState.draft;
   const isNew = modalState.id === null;
+  // El perfil supervisor abre el proyecto en modo "Ver": puede consultar toda
+  // la información interna pero ningún campo es editable ni hay botón de
+  // Guardar — solo Cerrar.
+  const readOnly = !!modalState.readOnly;
   return `
   <div class="modal-overlay" data-action="close-modal-overlay">
     <div class="modal-card" data-stop-close>
       <div class="modal-header">
-        <h2>${isNew ? 'Nuevo proyecto' : `${esc(d.cliente||'Proyecto')} — ${esc(d.sede||'')}`}</h2>
+        <h2>${isNew ? 'Nuevo proyecto' : `${esc(d.cliente||'Proyecto')} — ${esc(d.sede||'')}`}${readOnly ? ' <span class="status-pill" style="--chip-color:#8c8c86">Solo lectura</span>' : ''}</h2>
         <button class="modal-close" data-action="close-modal">✕</button>
       </div>
       <form id="projectForm" class="modal-form">
@@ -1341,7 +1396,7 @@ function renderModal(){
           <fieldset class="form-section">
             <legend>${g.title}</legend>
             <div class="form-grid">
-              ${g.fields.map(f => renderField(f, d)).join('')}
+              ${g.fields.map(f => renderField(f, d, readOnly)).join('')}
             </div>
           </fieldset>
         `).join('')}
@@ -1352,7 +1407,8 @@ function renderModal(){
             ${['tuberia','cableado','equipos'].map(k => `
               <div class="progress-editor-row">
                 <label>${k==='tuberia'?'Tubería':k==='cableado'?'Cableado':'Equipos'}</label>
-                <input type="range" min="0" max="100" step="5" name="${k}" value="${d[k]||0}" data-progress-slider />
+                <input type="range" min="0" max="100" step="1" value="${d[k]||0}" data-progress-slider data-progress-key="${k}" tabindex="-1" aria-hidden="true" ${readOnly?'disabled':''} />
+                <input type="number" min="0" max="100" step="1" inputmode="numeric" name="${k}" value="${d[k]||0}" class="progress-editor-number" data-progress-number data-progress-key="${k}" ${readOnly?'disabled':''} />
                 <span class="progress-editor-value" data-progress-value-for="${k}">${d[k]||0}%</span>
               </div>
             `).join('')}
@@ -1367,21 +1423,24 @@ function renderModal(){
         ${!isNew ? `<p class="auth-note">Última modificación por <strong>${esc(d.lastModifiedBy||'—')}</strong>${d.lastModifiedAt ? ' el '+fmtDateTime(d.lastModifiedAt) : ''}</p>` : ''}
 
         <div class="modal-footer">
-          <button type="button" class="btn btn-text" data-action="close-modal">Cancelar</button>
-          <button type="submit" class="btn btn-primary">Guardar cambios</button>
+          ${readOnly
+            ? `<button type="button" class="btn btn-primary" data-action="close-modal">Cerrar</button>`
+            : `<button type="button" class="btn btn-text" data-action="close-modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar cambios</button>`}
         </div>
       </form>
     </div>
   </div>`;
 }
 
-function renderField(f, d){
+function renderField(f, d, readOnly){
   const val = d[f.key] ?? '';
+  const dis = readOnly ? 'disabled' : '';
   if (f.type === 'select'){
     return `
       <div class="field">
         <label>${f.label}</label>
-        <select name="${f.key}">
+        <select name="${f.key}" ${dis}>
           <option value="">—</option>
           ${f.options.map(o=>`<option value="${esc(o)}" ${val===o?'selected':''}>${esc(o)}</option>`).join('')}
         </select>
@@ -1391,7 +1450,7 @@ function renderField(f, d){
     return `
       <div class="field field-wide">
         <label>${f.label}</label>
-        <textarea name="${f.key}" rows="3">${esc(val)}</textarea>
+        <textarea name="${f.key}" rows="3" ${dis}>${esc(val)}</textarea>
       </div>`;
   }
   if (f.type === 'date'){
@@ -1399,15 +1458,15 @@ function renderField(f, d){
       <div class="field">
         <label>${f.label}</label>
         <div class="date-field-row">
-          <input type="date" name="${f.key}" value="${esc(val)}" />
-          <button type="button" class="btn btn-text btn-clear-date" data-action="clear-date" data-target="${f.key}" title="Borrar esta fecha">Borrar fecha ✕</button>
+          <input type="date" name="${f.key}" value="${esc(val)}" ${dis} />
+          ${readOnly ? '' : `<button type="button" class="btn btn-text btn-clear-date" data-action="clear-date" data-target="${f.key}" title="Borrar esta fecha">Borrar fecha ✕</button>`}
         </div>
       </div>`;
   }
   return `
     <div class="field">
       <label>${f.label}</label>
-      <input type="${f.type}" name="${f.key}" value="${esc(val)}" />
+      <input type="${f.type}" name="${f.key}" value="${esc(val)}" ${dis} />
     </div>`;
 }
 
@@ -1647,6 +1706,12 @@ function onRootClick(e){
       if (p) { modalState = { id: p.id, draft: { ...p } }; render(); }
       break;
     }
+    case 'open-view-project': {
+      // Perfil supervisor: abre el proyecto en modo solo lectura.
+      const p = projects.find(x=>x.id===Number(btn.dataset.id));
+      if (p) { modalState = { id: p.id, draft: { ...p }, readOnly: true }; render(); }
+      break;
+    }
     case 'close-modal': modalState = null; render(); break;
     case 'confirm-delete': pendingDeleteId = Number(btn.dataset.id); render(); break;
     case 'cancel-delete': pendingDeleteId = null; render(); break;
@@ -1679,7 +1744,6 @@ function onRootClick(e){
       userModalState = { mode:'edit', email: btn.dataset.email, draft:{} };
       render(); break;
     case 'close-user-modal': userModalState = null; userActionError=''; render(); break;
-    case 'toggle-user-role': toggleUserRole(btn.dataset.email); break;
     case 'confirm-delete-user': pendingDeleteUserEmail = btn.dataset.email; render(); break;
     case 'cancel-delete-user': pendingDeleteUserEmail = null; render(); break;
     case 'do-delete-user': doDeleteUser(); break;
@@ -1698,19 +1762,32 @@ function onRootChange(e){
 function onRootInput(e){
   if (e.target.matches('[data-filter="search"]')){
     filters.search = e.target.value;
-    // live filter without full re-render focus loss: re-render table only via full render but keep caret is non-trivial;
-    // for simplicity re-render fully (fields keep typed value since we pass filters.search back into value attr)
+    // Solo se refresca la franja de resultados (#proyectosResultsWrap); el
+    // <input> del buscador nunca se destruye, así que se puede escribir
+    // seguido sin que el navegador "pierda" caracteres.
     renderProyectosTableOnly();
     return;
   }
-  if (e.target.matches('[data-progress-slider]')){
-    const name = e.target.name;
-    const valSpan = document.querySelector(`[data-progress-value-for="${name}"]`);
-    if (valSpan) valSpan.textContent = e.target.value + '%';
-    const sliders = document.querySelectorAll('[data-progress-slider]');
+  if (e.target.matches('[data-progress-slider], [data-progress-number]')){
+    // El slider ahora avanza de 1 en 1 (ya no de 5 en 5) y además hay un
+    // campo numérico al lado para escribir directamente el valor exacto que
+    // se quiera registrar. Ambos controles se mantienen sincronizados.
+    const key = e.target.dataset.progressKey;
+    let raw = Number(e.target.value);
+    if (Number.isNaN(raw)) raw = 0;
+    raw = Math.min(100, Math.max(0, Math.round(raw)));
+    const slider = document.querySelector(`[data-progress-slider][data-progress-key="${key}"]`);
+    const number = document.querySelector(`[data-progress-number][data-progress-key="${key}"]`);
+    // No se reescribe el control que el usuario está usando en este momento,
+    // para no perder el cursor mientras escribe en el campo numérico.
+    if (slider && slider !== e.target) slider.value = raw;
+    if (number && number !== e.target) number.value = raw;
+    const valSpan = document.querySelector(`[data-progress-value-for="${key}"]`);
+    if (valSpan) valSpan.textContent = raw + '%';
+    const numbers = document.querySelectorAll('[data-progress-number]');
     let total = 0;
-    sliders.forEach(s => total += Number(s.value));
-    const avg = Math.round(total / sliders.length);
+    numbers.forEach(n => total += (n === e.target ? raw : (Number(n.value)||0)));
+    const avg = Math.round(total / numbers.length);
     const fill = document.getElementById('modalAvanceFill');
     const label = document.getElementById('modalAvanceValue');
     if (fill) fill.style.width = avg + '%';
@@ -1719,18 +1796,13 @@ function onRootInput(e){
 }
 
 function renderProyectosTableOnly(){
-  // Lightweight re-render of just the proyectos section content to preserve search input focus.
-  const section = root.querySelector('.tab-content');
-  if (section && activeTab==='proyectos'){
-    const scrollX = window.scrollX, scrollY = window.scrollY;
-    section.innerHTML = renderProyectos();
-    const input = section.querySelector('[data-filter="search"]');
-    if (input){
-      input.focus();
-      const v = input.value; input.value=''; input.value=v;
-    }
-    window.scrollTo(scrollX, scrollY);
-  }
+  // Refresca ÚNICAMENTE la franja de resultados de la pestaña Proyectos
+  // (#proyectosResultsWrap). El buscador y los selects de filtro quedan
+  // intactos, así que el campo de texto conserva el foco y el cursor sin
+  // ningún truco adicional.
+  if (activeTab!=='proyectos') return;
+  const wrap = root.querySelector('#proyectosResultsWrap');
+  if (wrap) wrap.innerHTML = renderProyectosResults(filteredProjects());
 }
 
 function onRootSubmit(e){
@@ -1775,7 +1847,8 @@ async function doCreateUser(fd){
   const name = String(fd.get('name')).trim();
   const email = String(fd.get('email')).trim().toLowerCase();
   const password = String(fd.get('password'));
-  const role = String(fd.get('role')) === 'admin' ? 'admin' : 'user';
+  const roleRaw = String(fd.get('role') || '');
+  const role = ['admin','supervisor','user'].includes(roleRaw) ? roleRaw : 'user';
   if (!name || !email || password.length < 6){
     userActionError = 'Completa todos los campos (contraseña de mínimo 6 caracteres).';
     render(); return;
@@ -1786,7 +1859,7 @@ async function doCreateUser(fd){
   }
   users.push({ name, email, passHash: simpleHash(password), role, createdAt: new Date().toISOString() });
   await persistUsers();
-  logChange({ project:'—', text:`Creó el acceso de ${name} (${email}) como ${role==='admin'?'administrador':'usuario'}.` });
+  logChange({ project:'—', text:`Creó el acceso de ${name} (${email}) como ${roleLabel(role).toLowerCase()}.` });
   userModalState = null;
   userActionNotice = { title:'Persona creada', code: password, body: `Comparte esta contraseña temporal con ${name} por un canal seguro (no por este medio). Podrá iniciar sesión con ${email}.` };
   render();
@@ -1814,6 +1887,8 @@ async function doResetUser(fd){
 async function doEditUser(fd){
   const name = String(fd.get('name')).trim();
   const email = String(fd.get('email')).trim().toLowerCase();
+  const roleRaw = String(fd.get('role') || '');
+  const role = ['admin','supervisor','user'].includes(roleRaw) ? roleRaw : 'user';
   if (!name || !email){
     userActionError = 'Completa el nombre y el correo.';
     render(); return;
@@ -1827,15 +1902,22 @@ async function doEditUser(fd){
     userActionError = 'Ya existe otra cuenta registrada con ese correo.';
     render(); return;
   }
+  // Nunca se puede dejar la plataforma sin al menos un administrador.
+  if (user.role === 'admin' && role !== 'admin' && users.filter(u=>u.role==='admin').length <= 1){
+    userActionError = 'Debe existir al menos un administrador. Asigna el rol de administrador a otra persona antes de quitarlo aquí.';
+    render(); return;
+  }
 
-  const oldName = user.name, oldEmail = user.email;
+  const oldName = user.name, oldEmail = user.email, oldRole = user.role || 'user';
   user.name = name;
   user.email = email;
+  user.role = role;
   await persistUsers();
 
   const changes = [];
   if (oldName !== name) changes.push(`nombre: "${oldName}" → "${name}"`);
   if (oldEmail.toLowerCase() !== email) changes.push(`correo: "${oldEmail}" → "${email}"`);
+  if (oldRole !== role) changes.push(`rol: "${roleLabel(oldRole)}" → "${roleLabel(role)}"`);
   logChange({ project:'—', text: changes.length ? `Editó a ${oldName}: ${changes.join(' · ')}.` : `Editó a ${oldName} sin cambios.` });
 
   // Si la persona se editó a sí misma, actualizamos su sesión activa y la
@@ -1843,6 +1925,7 @@ async function doEditUser(fd){
   // cierre la sesión ni pierda el acceso.
   if (currentUser && currentUser.email.toLowerCase() === oldEmail.toLowerCase()){
     currentUser = { name: user.name, email: user.email, role: user.role || 'user' };
+    if (!canSeeAdminTabs(currentUser.role) && ADMIN_ONLY_TABS.includes(activeTab)) activeTab = 'resumen';
     await saveSession(user.email);
   }
 
@@ -1871,23 +1954,6 @@ async function doChangeOwnPassword(fd){
   userModalState = null;
   render();
   alert('Tu contraseña se actualizó correctamente.');
-}
-
-async function toggleUserRole(email){
-  const user = users.find(u => u.email === email);
-  if (!user) return;
-  if (user.role === 'admin' && users.filter(u=>u.role==='admin').length <= 1){
-    alert('Debe existir al menos un administrador. Asigna el rol a otra persona antes de quitarlo aquí.');
-    return;
-  }
-  user.role = user.role === 'admin' ? 'user' : 'admin';
-  await persistUsers();
-  logChange({ project:'—', text:`Cambió el rol de ${user.name} (${user.email}) a ${user.role==='admin'?'administrador':'usuario'}.` });
-  if (currentUser && currentUser.email === user.email){
-    currentUser.role = user.role;
-    if (user.role !== 'admin' && ADMIN_ONLY_TABS.includes(activeTab)) activeTab = 'resumen';
-  }
-  render();
 }
 
 async function doDeleteUser(){
@@ -2068,7 +2134,7 @@ async function silentAutoRefresh(){
       const fresh = users.find(x => x.email.toLowerCase() === currentUser.email.toLowerCase());
       if (fresh){
         currentUser = { name: fresh.name, email: fresh.email, role: fresh.role || 'user' };
-        if (currentUser.role !== 'admin' && ADMIN_ONLY_TABS.includes(activeTab)) activeTab = 'resumen';
+        if (!canSeeAdminTabs(currentUser.role) && ADMIN_ONLY_TABS.includes(activeTab)) activeTab = 'resumen';
       } else {
         currentUser = null; authView = 'login';
         await clearSession();

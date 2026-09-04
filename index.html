@@ -1400,7 +1400,7 @@ function renderField(f, d){
         <label>${f.label}</label>
         <div class="date-field-row">
           <input type="date" name="${f.key}" value="${esc(val)}" />
-          <button type="button" class="btn btn-text btn-clear-date" data-action="clear-date" data-target="${f.key}" title="Borrar fecha">Borrar</button>
+          <button type="button" class="btn btn-text btn-clear-date" data-action="clear-date" data-target="${f.key}" title="Borrar esta fecha">Borrar fecha ✕</button>
         </div>
       </div>`;
   }
@@ -1616,7 +1616,13 @@ function onRootClick(e){
         // podía reaparecer al guardar si el campo no perdía el foco antes.
         input.dispatchEvent(new Event('input', { bubbles: true }));
         input.dispatchEvent(new Event('change', { bubbles: true }));
-        input.focus();
+        // IMPORTANTE: NO usamos input.focus() aquí. En Safari de iPhone,
+        // poner el foco en un input type="date" reabre automáticamente el
+        // calendario nativo, que puede volver a rellenar la fecha de hoy y
+        // deshacer el borrado que acabamos de hacer. Usamos blur() para
+        // asegurarnos de que el campo quede realmente vacío y el calendario
+        // nativo no se vuelva a abrir solo.
+        input.blur();
       }
       return;
     }

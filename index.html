@@ -515,10 +515,30 @@ function countByWeek(dateField, buckets){
 }
 
 /* ---------- Filtro por período para la pestaña Análisis ---------- */
-// Se basa en "lastModifiedAt" (última vez que alguien tocó el proyecto en la
-// aplicación), que es el único dato con el que sí sabemos cuándo hubo
-// actividad real. Los proyectos que nunca se han editado desde que se cargó
-// la información inicial no tienen esta fecha y por eso solo aparecen en "Todos".
+// Idealmente se basa en "lastModifiedAt" (última vez que alguien tocó el
+// proyecto en la aplicación). PERO: los proyectos cargados inicialmente (o
+// importados) nunca tienen ese campo hasta que alguien los edita desde la
+// app — con la información real, prácticamente ningún proyecto lo tenía, así
+// que "Última semana / 15 días / mes" siempre mostraban el gráfico vacío (0
+// en todos los estados) y parecía que los botones no hacían nada.
+// Por eso, cuando falta lastModifiedAt, usamos como respaldo la fecha más
+// reciente entre las fechas de gestión que sí tiene el proyecto (cotización,
+// inicio de obra, entrega, OC, facturación, recaudo, liquidación) como mejor
+// estimado de "cuándo hubo actividad" en ese proyecto.
+const ACTIVITY_FALLBACK_FIELDS = [
+  'fFacturacionRecaudo','fEmisionFactura','fFacturacionOC','fRecepcionOC',
+  'fLiquidacion','fEntrega','fPruebas','fInicioObra','fAprobCot','fEnvioCot',
+];
+function getActivityDate(p){
+  const explicit = parseDateSafe(p.lastModifiedAt);
+  if (explicit) return explicit;
+  let latest = null;
+  for (const field of ACTIVITY_FALLBACK_FIELDS){
+    const d = parseDateSafe(p[field]);
+    if (d && (!latest || d > latest)) latest = d;
+  }
+  return latest;
+}
 const ANALISIS_PERIODS = [
   { key:'todos',    label:'Todos los estados' },
   { key:'semana',   label:'Última semana' },
@@ -539,14 +559,15 @@ function periodRangeDates(period){
   const prevStart = new Date(now); prevStart.setDate(prevStart.getDate() - (days*2));
   return { currentStart, currentEnd: now, prevStart, prevEnd: currentStart };
 }
-// Cuenta, para cada estado, cuántos proyectos tienen lastModifiedAt dentro de [start, end).
+// Cuenta, para cada estado, cuántos proyectos tienen actividad dentro de [start, end).
 function countEstadosInRange(start, end){
   return STATUSES.map(st => projects.filter(p => {
     if (p.estado !== st) return false;
-    const d = parseDateSafe(p.lastModifiedAt);
+    const d = getActivityDate(p);
     return d && d >= start && d < end;
   }).length);
 }
+
 
 /* ---------- Almacenamiento persistente (Firebase Firestore) ---------- */
 // IMPORTANTE: rellena estos datos con los de TU proyecto de Firebase antes
@@ -1129,7 +1150,7 @@ function renderAnalisis(){
 
       <div>
         <h3 class="chart-title" style="margin-bottom:2px">Proyectos por estado — periodo actual vs. anterior</h3>
-        <p class="auth-note" style="margin-bottom:14px">Con base en la fecha de última actualización de cada proyecto en la aplicación. Compara, para cada estado, cuántos proyectos se actualizaron en el periodo elegido contra el mismo número de días inmediatamente anterior — por ejemplo, esta semana contra la semana pasada. "Todos los estados" muestra el total acumulado, sin comparación.</p>
+        <p class="auth-note" style="margin-bottom:14px">Con base en la fecha de actividad más reciente de cada proyecto: la última edición guardada en la app y, si nunca se ha editado, la más reciente entre sus fechas de gestión (cotización, obra, entrega, OC, factura, recaudo o liquidación). Compara, para cada estado, cuántos proyectos tuvieron actividad en el periodo elegido contra el mismo número de días inmediatamente anterior — por ejemplo, esta semana contra la semana pasada. "Todos los estados" muestra el total acumulado, sin comparación.</p>
         <div class="status-chip-row" style="margin-bottom:16px">
           ${ANALISIS_PERIODS.map(p => `
             <button class="status-chip ${analisisPeriod===p.key?'active':''}" style="--chip-color:#F6D500" data-action="set-analisis-period" data-period="${p.key}">

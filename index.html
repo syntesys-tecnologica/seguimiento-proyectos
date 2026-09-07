@@ -407,7 +407,6 @@ let userModalState = null; // { mode:'new'|'reset', email?, draft:{} }
 let userActionError = '';
 let userActionNotice = null; // { title, body } shown after create/reset
 let isRefreshing = false;
-let analisisPeriod = 'todos'; // 'todos' | 'semana' | 'quincena' | 'mes'
 // Pestañas que NO existen para el perfil "usuario" básico: si el rol de la
 // persona cambia (o se restaura una sesión) mientras está en una de estas, la
 // devolvemos a "Resumen" para que no quede en una pantalla sin acceso.
@@ -513,61 +512,6 @@ function countByWeek(dateField, buckets){
     return dd >= b.monday && dd <= b.sunday;
   }).length);
 }
-
-/* ---------- Filtro por período para la pestaña Análisis ---------- */
-// Idealmente se basa en "lastModifiedAt" (última vez que alguien tocó el
-// proyecto en la aplicación). PERO: los proyectos cargados inicialmente (o
-// importados) nunca tienen ese campo hasta que alguien los edita desde la
-// app — con la información real, prácticamente ningún proyecto lo tenía, así
-// que "Última semana / 15 días / mes" siempre mostraban el gráfico vacío (0
-// en todos los estados) y parecía que los botones no hacían nada.
-// Por eso, cuando falta lastModifiedAt, usamos como respaldo la fecha más
-// reciente entre las fechas de gestión que sí tiene el proyecto (cotización,
-// inicio de obra, entrega, OC, facturación, recaudo, liquidación) como mejor
-// estimado de "cuándo hubo actividad" en ese proyecto.
-const ACTIVITY_FALLBACK_FIELDS = [
-  'fFacturacionRecaudo','fEmisionFactura','fFacturacionOC','fRecepcionOC',
-  'fLiquidacion','fEntrega','fPruebas','fInicioObra','fAprobCot','fEnvioCot',
-];
-function getActivityDate(p){
-  const explicit = parseDateSafe(p.lastModifiedAt);
-  if (explicit) return explicit;
-  let latest = null;
-  for (const field of ACTIVITY_FALLBACK_FIELDS){
-    const d = parseDateSafe(p[field]);
-    if (d && (!latest || d > latest)) latest = d;
-  }
-  return latest;
-}
-const ANALISIS_PERIODS = [
-  { key:'todos',    label:'Todos los estados' },
-  { key:'semana',   label:'Última semana' },
-  { key:'quincena', label:'Últimos 15 días' },
-  { key:'mes',      label:'Último mes' },
-];
-// Devuelve el rango del periodo elegido y el rango, de la misma duración,
-// inmediatamente anterior — para poder comparar "esta semana" contra
-// "la semana pasada", etc. Para "todos" no hay comparación (devuelve null).
-function periodRangeDates(period){
-  const now = new Date();
-  let days;
-  if (period === 'semana') days = 7;
-  else if (period === 'quincena') days = 15;
-  else if (period === 'mes') days = 30;
-  else return null; // 'todos'
-  const currentStart = new Date(now); currentStart.setDate(currentStart.getDate() - days);
-  const prevStart = new Date(now); prevStart.setDate(prevStart.getDate() - (days*2));
-  return { currentStart, currentEnd: now, prevStart, prevEnd: currentStart };
-}
-// Cuenta, para cada estado, cuántos proyectos tienen actividad dentro de [start, end).
-function countEstadosInRange(start, end){
-  return STATUSES.map(st => projects.filter(p => {
-    if (p.estado !== st) return false;
-    const d = getActivityDate(p);
-    return d && d >= start && d < end;
-  }).length);
-}
-
 
 /* ---------- Almacenamiento persistente (Firebase Firestore) ---------- */
 // IMPORTANTE: rellena estos datos con los de TU proyecto de Firebase antes
@@ -1148,20 +1092,10 @@ function renderAnalisis(){
         </div>
       </div>
 
-      <div>
-        <h3 class="chart-title" style="margin-bottom:2px">Proyectos por estado — periodo actual vs. anterior</h3>
-        <p class="auth-note" style="margin-bottom:14px">Con base en la fecha de actividad más reciente de cada proyecto: la última edición guardada en la app y, si nunca se ha editado, la más reciente entre sus fechas de gestión (cotización, obra, entrega, OC, factura, recaudo o liquidación). Compara, para cada estado, cuántos proyectos tuvieron actividad en el periodo elegido contra el mismo número de días inmediatamente anterior — por ejemplo, esta semana contra la semana pasada. "Todos los estados" muestra el total acumulado, sin comparación.</p>
-        <div class="status-chip-row" style="margin-bottom:16px">
-          ${ANALISIS_PERIODS.map(p => `
-            <button class="status-chip ${analisisPeriod===p.key?'active':''}" style="--chip-color:#F6D500" data-action="set-analisis-period" data-period="${p.key}">
-              ${p.label}
-            </button>
-          `).join('')}
-        </div>
-      </div>
-
       <div class="panel-row">
         <div class="chart-box chart-box-wide">
+          <h3 class="chart-title">Estado actual de los proyectos</h3>
+          <p class="auth-note" style="margin-bottom:10px">Cantidad total de proyectos que hay hoy en cada estado del proceso (${projects.length} proyectos en total).</p>
           <div class="chart-canvas-box">
             <canvas id="chartEstado"></canvas>
           </div>
@@ -1532,8 +1466,59 @@ function destroyCharts(){
   charts = {};
 }
 
+// ---------- Estilo visual unificado de todos los gráficos ----------
+// Paleta y tipografía tomadas de las variables CSS de la app (--ink, --muted,
+// --line) para que los gráficos se sientan parte del mismo diseño y no un
+// añadido genérico de la librería.
+const CHART_INK = '#141414';
+const CHART_MUTED = '#6b6b63';
+const CHART_GRID = '#EDEAE0';
+const CHART_FONT = { family: "'Inter', -apple-system, sans-serif", size: 12 };
+
+// Tooltip y ejes con la misma apariencia "de papel" del resto de la app:
+// fondo oscuro sólido, esquinas redondeadas, sin bordes duros en la grilla.
+function elegantScales({ horizontal = false } = {}){
+  const valueAxis = {
+    beginAtZero: true,
+    ticks: { precision: 0, color: CHART_MUTED, font: CHART_FONT },
+    grid: { color: CHART_GRID, drawTicks: false },
+    border: { display: false },
+  };
+  const categoryAxis = {
+    ticks: { color: CHART_INK, font: { ...CHART_FONT, weight: '600' } },
+    grid: { display: false },
+    border: { display: false },
+  };
+  return horizontal
+    ? { x: valueAxis, y: categoryAxis }
+    : { x: categoryAxis, y: valueAxis };
+}
+function elegantTooltip(extra){
+  return {
+    backgroundColor: '#1c1c1a',
+    titleFont: { ...CHART_FONT, weight: '700' },
+    bodyFont: CHART_FONT,
+    padding: 10,
+    cornerRadius: 8,
+    displayColors: true,
+    boxPadding: 4,
+    ...extra,
+  };
+}
+function elegantLegend(show){
+  return {
+    display: show,
+    position: 'bottom',
+    labels: { color: CHART_INK, font: CHART_FONT, boxWidth: 12, boxHeight: 12, padding: 16, usePointStyle: true, pointStyle: 'circle' },
+  };
+}
+
 function buildCharts(){
   destroyCharts();
+  if (typeof Chart !== 'undefined'){
+    Chart.defaults.font.family = CHART_FONT.family;
+    Chart.defaults.color = CHART_MUTED;
+  }
   // Si por cualquier motivo la librería de gráficos no cargó (por ejemplo, sin
   // conexión a internet o un bloqueo de red), lo mostramos de forma visible en
   // cada recuadro en vez de dejarlo en blanco sin explicación.
@@ -1563,57 +1548,52 @@ function buildCharts(){
       data:{
         labels: buckets.map(b=>b.label),
         datasets:[
-          { label:'Facturadas', data: countByWeek('fEmisionFactura', buckets), backgroundColor:'#7A5FC0' },
-          { label:'OC recibida', data: countByWeek('fRecepcionOC', buckets), backgroundColor:'#E08A2C' },
-          { label:'Recaudadas', data: countByWeek('fFacturacionRecaudo', buckets), backgroundColor:'#141414' },
+          { label:'Facturadas', data: countByWeek('fEmisionFactura', buckets), backgroundColor:'#7A5FC0', borderRadius:5, borderSkipped:false, maxBarThickness:26 },
+          { label:'OC recibida', data: countByWeek('fRecepcionOC', buckets), backgroundColor:'#E08A2C', borderRadius:5, borderSkipped:false, maxBarThickness:26 },
+          { label:'Recaudadas', data: countByWeek('fFacturacionRecaudo', buckets), backgroundColor:'#141414', borderRadius:5, borderSkipped:false, maxBarThickness:26 },
         ]
       },
       options:{
         responsive:true,
         maintainAspectRatio:false,
-        plugins:{ legend:{ position:'bottom', labels:{ font:{ family:'Inter' } } } },
-        scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } }
+        interaction:{ mode:'index', intersect:false },
+        plugins:{ legend: elegantLegend(true), tooltip: elegantTooltip() },
+        scales: elegantScales(),
       }
     });
   }
 
   const elEstado = document.getElementById('chartEstado');
   if (elEstado){
-    const range = periodRangeDates(analisisPeriod);
-    if (!range){
-      // "Todos los estados": total acumulado, sin comparación de periodo.
-      safeChart(elEstado, 'estado', {
-        type:'bar',
-        data:{ labels: STATUSES, datasets:[{ label:'Total', data: STATUSES.map(st=>projects.filter(p=>p.estado===st).length), backgroundColor: STATUSES.map(st=>STATUS_COLORS[st]) }] },
-        options: { ...baseBarOptions(), maintainAspectRatio:false }
-      });
-    } else {
-      const current = countEstadosInRange(range.currentStart, range.currentEnd);
-      const previous = countEstadosInRange(range.prevStart, range.prevEnd);
-      safeChart(elEstado, 'estado', {
-        type:'bar',
-        data:{
-          labels: STATUSES,
-          datasets:[
-            { label:'Este periodo', data: current, backgroundColor:'#F6D500' },
-            { label:'Periodo anterior', data: previous, backgroundColor:'#8c8c86' },
-          ]
-        },
-        options:{
-          responsive:true,
-          maintainAspectRatio:false,
-          plugins:{ legend:{ display:true, position:'bottom', labels:{ font:{ family:'Inter' } } } },
-          scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } }
-        }
-      });
-    }
+    // Estado actual de los proyectos: total acumulado por estado, sin
+    // comparación de periodos — una foto fija de cómo está la operación hoy.
+    safeChart(elEstado, 'estado', {
+      type:'bar',
+      data:{
+        labels: STATUSES,
+        datasets:[{
+          label:'Proyectos',
+          data: STATUSES.map(st=>projects.filter(p=>p.estado===st).length),
+          backgroundColor: STATUSES.map(st=>STATUS_COLORS[st]),
+          borderRadius:6,
+          borderSkipped:false,
+          maxBarThickness:56,
+        }]
+      },
+      options:{
+        responsive:true,
+        maintainAspectRatio:false,
+        plugins:{ legend: elegantLegend(false), tooltip: elegantTooltip() },
+        scales: elegantScales(),
+      }
+    });
   }
 
-  // Ciudad y contratista: totales ACUMULADOS de todos los proyectos (no se
-  // filtran por el selector de periodo), ordenados de mayor a menor cantidad.
-  // El de ciudad se dibuja horizontal y dentro de un contenedor cuya altura
-  // ya se calculó en renderAnalisis() según el número de ciudades, para que
-  // todas queden visibles sin apretarse ni recortarse.
+  // Ciudad y contratista: totales ACUMULADOS de todos los proyectos,
+  // ordenados de mayor a menor cantidad. El de ciudad se dibuja horizontal y
+  // dentro de un contenedor cuya altura ya se calculó en renderAnalisis()
+  // según el número de ciudades, para que todas queden visibles sin
+  // apretarse ni recortarse.
   const elCiudad = document.getElementById('chartCiudad');
   if (elCiudad){
     const ciudades = uniqueValues('ciudad');
@@ -1622,13 +1602,13 @@ function buildCharts(){
       .sort((a,b) => b.n - a.n);
     safeChart(elCiudad, 'ciudad', {
       type:'bar',
-      data:{ labels: paired.map(p=>p.c), datasets:[{ label:'Proyectos', data: paired.map(p=>p.n), backgroundColor:'#3B7DD8' }] },
+      data:{ labels: paired.map(p=>p.c), datasets:[{ label:'Proyectos', data: paired.map(p=>p.n), backgroundColor:'#3B7DD8', borderRadius:5, borderSkipped:false, maxBarThickness:22 }] },
       options:{
         responsive:true,
         maintainAspectRatio:false,
         indexAxis:'y',
-        plugins:{ legend:{ display:false } },
-        scales:{ x:{ beginAtZero:true, ticks:{ precision:0 } } }
+        plugins:{ legend: elegantLegend(false), tooltip: elegantTooltip() },
+        scales: elegantScales({ horizontal:true }),
       }
     });
   }
@@ -1641,18 +1621,16 @@ function buildCharts(){
       .sort((a,b) => b.n - a.n);
     safeChart(elContratistaCount, 'contratistaCount', {
       type:'bar',
-      data:{ labels: paired.map(p=>p.c), datasets:[{ label:'Proyectos', data: paired.map(p=>p.n), backgroundColor:'#7A5FC0' }] },
-      options:{ ...baseBarOptions(), maintainAspectRatio:false, indexAxis:'y' }
+      data:{ labels: paired.map(p=>p.c), datasets:[{ label:'Proyectos', data: paired.map(p=>p.n), backgroundColor:'#7A5FC0', borderRadius:5, borderSkipped:false, maxBarThickness:22 }] },
+      options:{
+        responsive:true,
+        maintainAspectRatio:false,
+        indexAxis:'y',
+        plugins:{ legend: elegantLegend(false), tooltip: elegantTooltip() },
+        scales: elegantScales({ horizontal:true }),
+      }
     });
   }
-}
-
-function baseBarOptions(){
-  return {
-    responsive:true,
-    plugins:{ legend:{ display:false } },
-    scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } }
-  };
 }
 
 /* ---------- Ciclo tras render ---------- */
@@ -1742,7 +1720,6 @@ function onRootClick(e){
       if (filters.estado.has(st)) filters.estado.delete(st); else filters.estado.add(st);
       render(); break;
     }
-    case 'set-analisis-period': analisisPeriod = btn.dataset.period; render(); break;
     case 'clear-filters':
       filters = { estado:new Set(), contratista:'', ciudad:'', coordinador:'', search:'' };
       render(); break;

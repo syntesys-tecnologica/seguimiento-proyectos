@@ -12,6 +12,10 @@
 <title>Estado General de Proyectos DC — Syntesys Tecnológica</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
 
@@ -26,22 +30,53 @@
   --muted:#6b6b63;
   --danger:#B3352A;
   --danger-bg:#FBEAE8;
+  /* --ink y --card son alias de --black/--white para texto y superficies
+     "de tarjeta" respectivamente. Se separan de --black/--white (que se
+     mantienen fijos como color de marca para topbar, botones y chips
+     oscuros) para que el modo oscuro solo tenga que redefinir --ink/--card
+     sin romper esos bloques que deben seguir viéndose negros siempre. */
+  --ink:var(--black);
+  --card:var(--white);
   --success:#2E9E5B;
   --success-bg:#EAF6EE;
 }
+
+/* ---------- Modo oscuro ---------- */
+/* Se activa poniendo data-theme="dark" en <html> (ver toggleTheme()). Solo
+   redefine las superficies/texto (--paper, --card, --line, --muted, --ink)
+   y los fondos tenues de aviso; --black/--white/--yellow se mantienen fijos
+   porque son el color de marca de topbar, botones y chips y ya funcionan
+   bien sobre fondo oscuro. */
+html[data-theme="dark"]{
+  --paper:#17181A;
+  --card:#232427;
+  --line:#34363A;
+  --muted:#9a9a94;
+  --ink:#F1F0EA;
+  --danger-bg:#3A2222;
+  --success-bg:#1E3327;
+}
+html[data-theme="dark"] .auth-simulated-email{ background:#33300E; }
+html[data-theme="dark"] .mini-log-project{ background:#34363A; color:var(--ink); }
+html[data-theme="dark"] .status-chip.active .status-chip-count{ color:#d8d8d0; }
+html[data-theme="dark"] .data-table tbody tr:hover{ background:#2A2C1E; }
+html[data-theme="dark"] tr[style*="FDFBEF"]{ background:#2A2C1E !important; }
+html[data-theme="dark"] .modal-card{ box-shadow:0 30px 60px rgba(0,0,0,.6); }
+html[data-theme="dark"] .status-pill{ filter:brightness(1.15); }
+html[data-theme="dark"] .kpi-card[style*="border-left-color"]{ background:var(--card); }
 
 *{ box-sizing:border-box; }
 html,body{ margin:0; padding:0; }
 body{
   font-family:'Inter', -apple-system, sans-serif;
   background:var(--paper);
-  color:var(--black);
+  color:var(--ink);
   -webkit-font-smoothing:antialiased;
 }
 #root{ min-height:100vh; }
 h1,h2,h3{ font-family:'Space Grotesk', 'Inter', sans-serif; margin:0; }
 button{ font-family:inherit; cursor:pointer; }
-a{ color:var(--black); }
+a{ color:var(--ink); }
 
 /* ---------- Loading ---------- */
 .loading-screen{
@@ -58,7 +93,7 @@ a{ color:var(--black); }
   padding:24px;
 }
 .auth-card{
-  width:100%; max-width:400px; background:var(--white); border:1px solid var(--line);
+  width:100%; max-width:400px; background:var(--card); border:1px solid var(--line);
   padding:36px 32px 28px; position:relative; margin-top:40px;
   box-shadow: 0 24px 48px rgba(0,0,0,0.18);
 }
@@ -78,7 +113,7 @@ a{ color:var(--black); }
 .field-label{ font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:var(--charcoal); margin-top:14px; margin-bottom:6px; }
 .auth-links{ display:flex; justify-content:space-between; margin-top:16px; font-size:13px; }
 .auth-links a{ text-decoration:none; color:var(--charcoal); border-bottom:1px solid var(--line); }
-.auth-links a:hover{ color:var(--black); border-color:var(--black); }
+.auth-links a:hover{ color:var(--ink); border-color:var(--ink); }
 .auth-hint{ margin-top:20px; font-size:12px; color:var(--muted); text-align:center; line-height:1.6; }
 .auth-note{ font-size:13px; color:var(--muted); line-height:1.5; }
 .auth-error{ background:var(--danger-bg); color:var(--danger); font-size:13px; padding:10px 12px; border-left:3px solid var(--danger); margin-bottom:4px; }
@@ -89,10 +124,10 @@ a{ color:var(--black); }
 
 /* ---------- Inputs / buttons ---------- */
 .text-input, select, input[type=text], input[type=email], input[type=password], input[type=date], input[type=number], textarea{
-  width:100%; padding:10px 12px; font-size:14px; font-family:inherit; color:var(--black);
-  background:var(--white); border:1px solid var(--line); outline:none;
+  width:100%; padding:10px 12px; font-size:14px; font-family:inherit; color:var(--ink);
+  background:var(--card); border:1px solid var(--line); outline:none;
 }
-.text-input:focus, select:focus, textarea:focus, input:focus{ border-color:var(--black); }
+.text-input:focus, select:focus, textarea:focus, input:focus{ border-color:var(--ink); }
 textarea{ resize:vertical; }
 
 .btn{ border:none; padding:10px 18px; font-size:13px; font-weight:600; letter-spacing:.01em; transition:background .15s, color .15s, border-color .15s; }
@@ -100,7 +135,7 @@ textarea{ resize:vertical; }
 .btn-block{ width:100%; margin-top:20px; }
 .btn-primary{ background:var(--black); color:var(--yellow); }
 .btn-primary:hover{ background:var(--charcoal); }
-.btn-outline{ background:var(--white); color:var(--black); border:1px solid var(--black); }
+.btn-outline{ background:var(--card); color:var(--ink); border:1px solid var(--ink); }
 .btn-outline:hover{ background:var(--black); color:var(--yellow); }
 .btn-ghost-yellow{ background:transparent; color:var(--yellow); border:1px solid var(--yellow); }
 .btn-ghost-yellow:hover{ background:var(--yellow); color:var(--black); }
@@ -129,8 +164,8 @@ textarea{ resize:vertical; }
 .tabs{ display:flex; gap:4px; margin-top:20px; border-bottom:1px solid var(--line); overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
 .tabs::-webkit-scrollbar{ display:none; }
 .tab-btn{ background:transparent; border:none; padding:12px 6px; margin-right:22px; font-size:14px; font-weight:600; color:var(--muted); border-bottom:3px solid transparent; white-space:nowrap; flex-shrink:0; }
-.tab-btn.active{ color:var(--black); border-bottom-color:var(--yellow); }
-.tab-btn:hover{ color:var(--black); }
+.tab-btn.active{ color:var(--ink); border-bottom-color:var(--yellow); }
+.tab-btn:hover{ color:var(--ink); }
 
 .tab-content{ padding-top:24px; }
 .panel{ display:flex; flex-direction:column; gap:24px; }
@@ -150,7 +185,7 @@ textarea{ resize:vertical; }
 /* ---------- KPIs ---------- */
 .kpi-grid{ display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; }
 .kpi-card{
-  background:var(--white); border:1px solid var(--line); border-left:4px solid var(--yellow);
+  background:var(--card); border:1px solid var(--line); border-left:4px solid var(--yellow);
   padding:16px 18px;
 }
 .kpi-card-hero{
@@ -176,11 +211,11 @@ textarea{ resize:vertical; }
 
 /* ---------- Panels / charts ---------- */
 .panel-row{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-.chart-box{ background:var(--white); border:1px solid var(--line); padding:18px 20px 8px; }
+.chart-box{ background:var(--card); border:1px solid var(--line); padding:18px 20px 8px; }
 .chart-box-wide{ grid-column:1 / -1; }
 .kpi-row{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
 @media (max-width:860px){ .kpi-row{ grid-template-columns:1fr; } }
-.kpi-card{ background:var(--white); border:1px solid var(--line); padding:18px 20px; }
+.kpi-card{ background:var(--card); border:1px solid var(--line); padding:18px 20px; }
 .kpi-card-label{ font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px; }
 .kpi-card-value{ font-family:'Space Grotesk','Inter',sans-serif; font-size:32px; font-weight:700; line-height:1; }
 .kpi-card-sub{ margin-top:8px; font-size:13px; color:var(--muted); }
@@ -200,6 +235,17 @@ textarea{ resize:vertical; }
   .chart-canvas-box{ height:170px; }
   .chart-canvas-box-lg{ height:200px; }
 }
+
+.mapa-box{
+  height:560px; width:100%; border-radius:10px; overflow:hidden; border:1px solid var(--line);
+  background:var(--card);
+}
+@media (max-width:640px){ .mapa-box{ height:420px; } }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip{ background:var(--card); color:var(--ink); }
+.leaflet-container{ font-family:'Inter', -apple-system, sans-serif; background:var(--paper); }
+html[data-theme="dark"] .leaflet-control-attribution{ background:rgba(35,36,39,.8); color:var(--muted); }
+html[data-theme="dark"] .leaflet-control-attribution a{ color:var(--muted); }
+html[data-theme="dark"] .leaflet-bar a{ background:var(--card); color:var(--ink); border-color:var(--line); }
 
 @media (max-width: 900px){
   .panel-row{ grid-template-columns:1fr; }
@@ -229,8 +275,37 @@ textarea{ resize:vertical; }
 }
 
 .status-chip-row{ display:flex; flex-wrap:wrap; gap:8px; }
+.saved-filters-row{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:10px 0 16px; }
+.saved-filters-label{ font-size:12px; color:var(--muted); font-weight:600; margin-right:2px; }
+.saved-filters-empty{ font-size:12px; color:var(--muted); font-style:italic; }
+.saved-filter-chip{
+  display:inline-flex; align-items:center; gap:6px; padding:5px 6px 5px 12px; border-radius:999px;
+  background:var(--card); border:1px solid var(--line); font-size:12.5px; font-weight:600; color:var(--ink);
+  cursor:pointer;
+}
+.saved-filter-chip:hover{ border-color:var(--ink); }
+.saved-filter-remove{
+  border:none; background:transparent; color:var(--muted); font-size:11px; line-height:1; cursor:pointer;
+  padding:4px 6px; border-radius:999px;
+}
+.saved-filter-remove:hover{ background:var(--danger-bg); color:var(--danger); }
+.saved-filters-row{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:10px 0 16px; }
+.saved-filters-label{ font-size:12px; color:var(--muted); font-weight:600; }
+.saved-filters-empty{ font-size:12px; color:var(--muted); font-style:italic; }
+.saved-filter-chip{
+  display:inline-flex; align-items:center; gap:6px; padding:4px 6px 4px 12px;
+  border:1px solid var(--line); border-radius:20px; background:var(--card);
+  font-size:12.5px; font-weight:600; cursor:pointer;
+}
+.saved-filter-chip:hover{ border-color:var(--ink); }
+.saved-filter-remove{
+  border:none; background:transparent; color:var(--muted); font-size:11px;
+  width:18px; height:18px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  padding:0; line-height:1;
+}
+.saved-filter-remove:hover{ background:var(--danger-bg); color:var(--danger); }
 .status-chip{
-  background:var(--white); border:1px solid var(--line); border-left:4px solid var(--chip-color);
+  background:var(--card); border:1px solid var(--line); border-left:4px solid var(--chip-color);
   padding:6px 12px; font-size:12px; font-weight:600; color:var(--charcoal);
 }
 .status-chip.active{ background:var(--black); color:var(--white); border-color:var(--black); border-left:4px solid var(--chip-color); }
@@ -238,10 +313,10 @@ textarea{ resize:vertical; }
 .status-chip.active .status-chip-count{ color:#bbb; }
 
 /* ---------- Table ---------- */
-.table-wrap{ overflow-x:auto; border:1px solid var(--line); background:var(--white); }
+.table-wrap{ overflow-x:auto; border:1px solid var(--line); background:var(--card); }
 .data-table{ width:100%; border-collapse:collapse; font-size:13px; min-width:900px; }
 .data-table thead th{
-  text-align:left; padding:10px 14px; background:var(--paper); border-bottom:2px solid var(--black);
+  text-align:left; padding:10px 14px; background:var(--paper); border-bottom:2px solid var(--ink);
   font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--charcoal); white-space:nowrap;
 }
 .data-table tbody td{ padding:12px 14px; border-bottom:1px solid var(--line); vertical-align:middle; }
@@ -267,14 +342,14 @@ textarea{ resize:vertical; }
   position:fixed; inset:0; background:rgba(20,20,20,.6); display:flex; align-items:flex-start; justify-content:center;
   padding:40px 20px; overflow-y:auto; z-index:50;
 }
-.modal-card{ background:var(--white); width:100%; max-width:720px; max-height:calc(100vh - 80px); display:flex; flex-direction:column; box-shadow:0 30px 60px rgba(0,0,0,.35); }
+.modal-card{ background:var(--card); width:100%; max-width:720px; max-height:calc(100vh - 80px); display:flex; flex-direction:column; box-shadow:0 30px 60px rgba(0,0,0,.35); }
 .modal-card-sm{ max-width:440px; max-height:none; }
 .modal-header{ display:flex; align-items:center; justify-content:space-between; padding:18px 24px; border-bottom:1px solid var(--line); }
 .modal-header h2{ font-size:16px; }
 .modal-close{ background:none; border:none; font-size:16px; color:var(--muted); }
-.modal-close:hover{ color:var(--black); }
+.modal-close:hover{ color:var(--ink); }
 .modal-form{ padding:20px 24px; overflow-y:auto; display:flex; flex-direction:column; gap:18px; }
-.modal-footer{ display:flex; justify-content:flex-end; gap:10px; padding-top:8px; border-top:1px solid var(--line); position:sticky; bottom:0; background:var(--white); }
+.modal-footer{ display:flex; justify-content:flex-end; gap:10px; padding-top:8px; border-top:1px solid var(--line); position:sticky; bottom:0; background:var(--card); }
 
 @media (max-width:640px){
   .modal-overlay{ padding:0; align-items:flex-end; }
@@ -304,7 +379,7 @@ textarea{ resize:vertical; }
 .progress-editor-number{ width:64px; padding:6px 8px; border:1px solid var(--line); border-radius:8px; font-size:13px; text-align:right; background:var(--paper); color:var(--ink); }
 .progress-editor-total{ display:grid; grid-template-columns:90px 1fr 48px; align-items:center; gap:12px; padding-top:8px; border-top:1px dashed var(--line); }
 .progress-editor-total label{ font-size:13px; font-weight:700; }
-input[type=range]{ accent-color:var(--black); }
+input[type=range]{ accent-color:var(--ink); }
 
 </style>
 </head>
@@ -400,6 +475,7 @@ let modalState = null; // { id: number|null, draft: {...} }
 let authView = 'login';
 let authError = '';
 let charts = {};
+let mapInstance = null; // instancia de Leaflet de la pestaña Mapa
 let pendingDeleteId = null;
 let pendingArchiveAudit = false;
 let pendingDeleteUserEmail = null;
@@ -407,6 +483,25 @@ let userModalState = null; // { mode:'new'|'reset', email?, draft:{} }
 let userActionError = '';
 let userActionNotice = null; // { title, body } shown after create/reset
 let isRefreshing = false;
+
+/* ---------- Modo oscuro ---------- */
+function applyTheme(theme){
+  document.documentElement.setAttribute('data-theme', theme === 'dark' ? 'dark' : 'light');
+}
+function getTheme(){
+  return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+}
+function toggleTheme(){
+  const next = getTheme() === 'dark' ? 'light' : 'dark';
+  applyTheme(next);
+  try{ localStorage.setItem('sy_dc_theme', next); }catch(e){}
+  render(); // los gráficos usan colores dependientes del tema
+}
+(function initTheme(){
+  let saved = null;
+  try{ saved = localStorage.getItem('sy_dc_theme'); }catch(e){}
+  applyTheme(saved || 'light');
+})();
 // Pestañas que NO existen para el perfil "usuario" básico: si el rol de la
 // persona cambia (o se restaura una sesión) mientras está en una de estas, la
 // devolvemos a "Resumen" para que no quede en una pantalla sin acceso.
@@ -511,6 +606,83 @@ function countByWeek(dateField, buckets){
     const dd = new Date(d); dd.setHours(0,0,0,0);
     return dd >= b.monday && dd <= b.sunday;
   }).length);
+}
+
+/* ---------- Indicador de tiempos promedio entre etapas ---------- */
+// Para detectar cuellos de botella: cuánto tarda, en promedio, un proyecto en
+// pasar de una fecha de gestión a la siguiente. Solo se cuentan los
+// proyectos que tienen AMBAS fechas registradas y donde la segunda es igual
+// o posterior a la primera (fechas invertidas o incompletas se ignoran en
+// vez de ensuciar el promedio).
+const STAGE_TRANSITIONS = [
+  { key:'cot_aprob',      label:'Envío cotización → Aprobación',  from:'fEnvioCot',    to:'fAprobCot' },
+  { key:'aprob_inicio',   label:'Aprobación → Inicio de obra',    from:'fAprobCot',    to:'fInicioObra' },
+  { key:'inicio_entrega', label:'Inicio de obra → Entrega',       from:'fInicioObra',  to:'fEntrega' },
+  { key:'entrega_oc',     label:'Entrega → OC recibida',          from:'fEntrega',     to:'fRecepcionOC' },
+  { key:'oc_factura',     label:'OC recibida → Facturación',      from:'fRecepcionOC', to:'fEmisionFactura' },
+  { key:'factura_recaudo',label:'Facturación → Recaudo',          from:'fEmisionFactura', to:'fFacturacionRecaudo' },
+];
+/* ---------- Vista de mapa (proyectos por ciudad) ---------- */
+// Coordenadas aproximadas de las ciudades que aparecen hoy en la base de
+// datos. Si en el futuro se agrega un proyecto en una ciudad nueva que no
+// esté en este diccionario, el mapa simplemente la omite (ver renderMapa) —
+// no rompe nada, solo no dibuja ese punto hasta que se agregue su coordenada.
+const CIUDAD_COORDS = {
+  'ARMENIA':             [4.5339, -75.6811],
+  'BARANOA':             [10.7936, -74.9153],
+  'BARRANCABERMEJA':     [7.0653, -73.8547],
+  'BARRANQUILLA':        [10.9639, -74.7964],
+  'BOGOTÁ':              [4.7110, -74.0721],
+  'BUCARAMANGA':         [7.1193, -73.1227],
+  'BUGA':                [3.9009, -76.2989],
+  'CALARCÁ':             [4.5237, -75.6438],
+  'CALI':                [3.4516, -76.5320],
+  'CARTAGENA':           [10.3910, -75.4794],
+  'CHIQUINQUIRÁ':        [5.6197, -73.8181],
+  'CÚCUTA':              [7.8939, -72.5078],
+  'DOSQUEBRADAS':        [4.8360, -75.6707],
+  'DUITAMA':             [5.8236, -73.0344],
+  'FLORENCIA':           [1.6144, -75.6062],
+  'FLORIDABLANCA':       [7.0631, -73.0868],
+  'IPIALES':             [0.8300, -77.6413],
+  'MONTELIBANO':         [7.9806, -75.4172],
+  'PALMIRA':             [3.5394, -76.3036],
+  'PAMPLONA':            [7.3746, -72.6486],
+  'PASTO':               [1.2136, -77.2811],
+  'ROLDANILLO':          [4.4147, -76.1522],
+  'SAN JUAN DEL CESAR':  [10.7706, -73.0022],
+  'SOACHA':              [4.5793, -74.2166],
+  'VALLEDUPAR':          [10.4631, -73.2532],
+  'VILLAVICENCIO':       [4.1420, -73.6266],
+  'VILLETA':             [5.0111, -74.4736],
+  'YOPAL':               [5.3378, -72.3959],
+};
+function cityProjectSummary(){
+  const byCity = {};
+  projects.forEach(p => {
+    const key = (p.ciudad || '').trim().toUpperCase();
+    if (!key) return;
+    if (!byCity[key]) byCity[key] = { ciudad: p.ciudad, total:0, porEstado:{} };
+    byCity[key].total++;
+    byCity[key].porEstado[p.estado || 'Sin estado'] = (byCity[key].porEstado[p.estado || 'Sin estado']||0) + 1;
+  });
+  return Object.values(byCity).sort((a,b)=>b.total-a.total);
+}
+
+function computeStageTimings(){
+  return STAGE_TRANSITIONS.map(t => {
+    const diffs = [];
+    projects.forEach(p => {
+      const a = parseDateSafe(p[t.from]);
+      const b = parseDateSafe(p[t.to]);
+      if (a && b){
+        const days = Math.round((b - a) / 86400000);
+        if (days >= 0) diffs.push(days);
+      }
+    });
+    const avg = diffs.length ? Math.round(diffs.reduce((s,x)=>s+x,0) / diffs.length) : null;
+    return { ...t, avg, n: diffs.length };
+  });
 }
 
 /* ---------- Almacenamiento persistente (Firebase Firestore) ---------- */
@@ -821,6 +993,7 @@ function renderApp(){
           ` : ''}
           ${activeTab==='resumen' ? renderResumen() : ''}
           ${activeTab==='proyectos' ? renderProyectos() : ''}
+          ${activeTab==='mapa' ? renderMapa() : ''}
           ${activeTab==='analisis' ? renderAnalisis() : ''}
           ${activeTab==='auditoria' ? renderAuditoria() : ''}
           ${activeTab==='usuarios' ? renderUsuarios() : ''}
@@ -850,6 +1023,7 @@ function renderTopbar(){
         <span class="topbar-user-name">${esc(currentUser.name)}</span>
         <span class="topbar-user-email">${esc(currentUser.email)}</span>
       </div>
+      <button class="btn btn-ghost-yellow" data-action="toggle-theme" title="Cambiar entre modo claro y oscuro">${getTheme()==='dark' ? '☀️ Modo claro' : '🌙 Modo oscuro'}</button>
       <button class="btn btn-ghost-yellow" data-action="open-change-password">Cambiar contraseña</button>
       <button class="btn btn-ghost-yellow" data-action="logout">Salir</button>
     </div>
@@ -860,6 +1034,7 @@ function renderTabs(){
   const tabs = [
     ['resumen','Resumen'],
     ['proyectos','Proyectos'],
+    ['mapa','Mapa'],
   ];
   // Análisis, Auditoría y Usuarios quedan reservadas al perfil administrador.
   if (canSeeAdminTabs(currentUser.role)) tabs.push(['analisis','Análisis'], ['auditoria','Auditoría'], ['usuarios','Usuarios']);
@@ -916,7 +1091,65 @@ function renderResumen(){
 }
 
 /* ----- PROYECTOS ----- */
-function renderProyectos(){
+/* ---------- Filtros favoritos (pestaña Proyectos) ---------- */
+// Se guardan en localStorage, por persona (clave con su correo), para que
+// cada quien tenga sus propios accesos rápidos — por ejemplo "Mis proyectos
+// activos en Bogotá" — sin tocar Firestore ni afectar a los demás usuarios.
+function savedFiltersKey(){
+  return currentUser ? `sy_dc_saved_filters:${currentUser.email.toLowerCase()}` : null;
+}
+function getSavedFilters(){
+  const key = savedFiltersKey();
+  if (!key) return [];
+  try{ return JSON.parse(localStorage.getItem(key) || '[]'); }catch(e){ return []; }
+}
+function setSavedFilters(list){
+  const key = savedFiltersKey();
+  if (!key) return;
+  try{ localStorage.setItem(key, JSON.stringify(list)); }catch(e){}
+}
+function currentFilterSnapshot(){
+  return {
+    estado: Array.from(filters.estado),
+    contratista: filters.contratista,
+    ciudad: filters.ciudad,
+    coordinador: filters.coordinador,
+    search: filters.search,
+  };
+}
+function hasActiveFilters(){
+  return !!(filters.estado.size || filters.contratista || filters.ciudad || filters.coordinador || filters.search);
+}
+function saveCurrentFilterAsFavorite(){
+  if (!hasActiveFilters()){
+    alert('Primero aplica al menos un filtro (estado, ciudad, contratista, coordinador o buscador) para poder guardarlo como favorito.');
+    return;
+  }
+  const name = window.prompt('¿Cómo quieres llamar a este filtro? (ej. "Mis proyectos activos en Bogotá")');
+  if (!name || !name.trim()) return;
+  const list = getSavedFilters();
+  list.push({ id: Date.now(), name: name.trim(), filters: currentFilterSnapshot() });
+  setSavedFilters(list);
+  render();
+}
+function applySavedFilter(id){
+  const found = getSavedFilters().find(f => f.id === id);
+  if (!found) return;
+  filters = {
+    estado: new Set(found.filters.estado || []),
+    contratista: found.filters.contratista || '',
+    ciudad: found.filters.ciudad || '',
+    coordinador: found.filters.coordinador || '',
+    search: found.filters.search || '',
+  };
+  render();
+}
+function deleteSavedFilter(id){
+  setSavedFilters(getSavedFilters().filter(f => f.id !== id));
+  render();
+}
+
+
   const list = filteredProjects();
   const contratistas = uniqueValues('contratista');
   const ciudades = uniqueValues('ciudad');
@@ -945,6 +1178,17 @@ function renderProyectos(){
           <button class="btn btn-outline" data-action="export-excel">Exportar a Excel</button>
           <button class="btn btn-primary" data-action="open-new-project">+ Nuevo proyecto</button>
         </div>
+      </div>
+
+      <div class="saved-filters-row">
+        <span class="saved-filters-label">Filtros favoritos:</span>
+        ${getSavedFilters().map(f => `
+          <span class="saved-filter-chip" data-action="apply-saved-filter" data-filter-id="${f.id}">
+            ${esc(f.name)}
+            <button type="button" class="saved-filter-remove" data-action="delete-saved-filter" data-filter-id="${f.id}" title="Eliminar este filtro favorito">✕</button>
+          </span>
+        `).join('') || '<span class="saved-filters-empty">Aún no tienes filtros guardados.</span>'}
+        <button class="btn btn-text" data-action="save-current-filter">+ Guardar filtro actual</button>
       </div>
 
       <div class="status-chip-row">
@@ -1014,7 +1258,95 @@ function renderProyectosResults(list){
 }
 
 /* ----- ANÁLISIS ----- */
-function renderAnalisis(){
+/* ----- MAPA ----- */
+function renderMapa(){
+  const summary = cityProjectSummary();
+  const withCoords = summary.filter(c => CIUDAD_COORDS[(c.ciudad||'').trim().toUpperCase()]);
+  const withoutCoords = summary.filter(c => !CIUDAD_COORDS[(c.ciudad||'').trim().toUpperCase()]);
+  return `
+    <section class="panel">
+      <div>
+        <h3 class="chart-title" style="margin-bottom:2px">Proyectos por ciudad en el mapa</h3>
+        <p class="auth-note" style="margin-bottom:14px">Cada círculo es una ciudad con proyectos; el tamaño y el número reflejan cuántos proyectos hay allí. Toca un círculo para ver el detalle por estado.</p>
+      </div>
+      <div id="mapaProyectos" class="mapa-box"></div>
+      ${withoutCoords.length ? `
+        <p class="auth-note" style="margin-top:10px">
+          No se pudo ubicar en el mapa: ${withoutCoords.map(c=>esc(c.ciudad)).join(', ')} (ciudad sin coordenada registrada todavía).
+        </p>
+      ` : ''}
+      <div class="table-wrap" style="margin-top:16px">
+        <table class="data-table">
+          <thead><tr><th>Ciudad</th><th>Proyectos</th></tr></thead>
+          <tbody>
+            ${summary.map(c => `<tr><td class="cell-strong">${esc(c.ciudad)}</td><td>${c.total}</td></tr>`).join('') || `<tr><td colspan="2" class="empty-row">No hay proyectos con ciudad registrada.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function buildMap(){
+  const container = document.getElementById('mapaProyectos');
+  if (!container) return;
+  if (typeof L === 'undefined'){
+    if (!container.querySelector('.chart-error')){
+      const msg = document.createElement('p');
+      msg.className = 'chart-error';
+      msg.textContent = 'No se pudo cargar la librería de mapas. Revisa tu conexión a internet y actualiza la página.';
+      container.appendChild(msg);
+    }
+    return;
+  }
+  // El contenedor se destruye y se vuelve a crear en cada render() (todo el
+  // <section> se reconstruye), así que la instancia anterior de Leaflet
+  // queda apuntando a un <div> que ya no existe en la página. Hay que
+  // liberarla explícitamente antes de crear una nueva sobre el <div> actual.
+  if (mapInstance){
+    try{ mapInstance.remove(); }catch(e){}
+    mapInstance = null;
+  }
+  const dark = getTheme() === 'dark';
+  const map = L.map(container, { scrollWheelZoom:false }).setView([4.6, -74.1], 5.4);
+  L.tileLayer(
+    dark
+      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+      : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+    { attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 18 }
+  ).addTo(map);
+
+  const summary = cityProjectSummary();
+  let maxTotal = 1;
+  summary.forEach(c => { if (c.total > maxTotal) maxTotal = c.total; });
+
+  summary.forEach(c => {
+    const coords = CIUDAD_COORDS[(c.ciudad||'').trim().toUpperCase()];
+    if (!coords) return;
+    const radius = 10 + (c.total / maxTotal) * 22;
+    const marker = L.circleMarker(coords, {
+      radius,
+      color: '#141414',
+      weight: 1.5,
+      fillColor: '#F6D500',
+      fillOpacity: 0.85,
+    }).addTo(map);
+    const detalle = Object.entries(c.porEstado)
+      .sort((a,b)=>b[1]-a[1])
+      .map(([estado,n]) => `<div style="display:flex;justify-content:space-between;gap:10px"><span style="color:${STATUS_COLORS[estado]||'#666'}">●</span>&nbsp;${esc(estado)}<strong style="margin-left:auto">${n}</strong></div>`)
+      .join('');
+    marker.bindTooltip(`${esc(c.ciudad)} · ${c.total} proyecto${c.total===1?'':'s'}`, { direction:'top' });
+    marker.bindPopup(`<div style="font-family:Inter,sans-serif;min-width:180px"><strong>${esc(c.ciudad)}</strong><br/><span style="color:#6b6b63;font-size:12px">${c.total} proyecto${c.total===1?'':'s'} en total</span><div style="margin-top:6px;font-size:12.5px">${detalle}</div></div>`);
+  });
+
+  mapInstance = map;
+  // Si el mapa se construyó dentro de un contenedor que aún no tenía su
+  // tamaño final (p. ej. justo después de cambiar de pestaña), Leaflet
+  // necesita que se le avise para recalcular el tamaño de los tiles.
+  setTimeout(() => { try{ map.invalidateSize(); }catch(e){} }, 80);
+}
+
+
   const WEEKS_BACK = 8;
   const buckets = buildWeeklyBuckets(WEEKS_BACK);
   const facturadas = countByWeek('fEmisionFactura', buckets);
@@ -1059,8 +1391,22 @@ function renderAnalisis(){
   const contratistaCount = uniqueValues('contratista').length;
   const contratistaChartHeight = Math.max(200, contratistaCount * 22);
 
+  const timings = computeStageTimings();
+  const bottleneck = timings.filter(t=>t.avg!==null).sort((a,b)=>b.avg-a.avg)[0];
+  const timingsChartHeight = Math.max(220, timings.length * 46);
+
   return `
     <section class="panel">
+      <div class="toolbar">
+        <div>
+          <h3 class="chart-title" style="margin-bottom:2px">Reporte ejecutivo mensual</h3>
+          <p class="auth-note">Descarga en un solo archivo de Excel el resumen por estado, el comparativo semanal, proyectos por ciudad y contratista, y los tiempos promedio entre etapas — listo para enviar o archivar.</p>
+        </div>
+        <div class="toolbar-right">
+          <button class="btn btn-outline" data-action="export-monthly-report">Descargar reporte mensual (Excel)</button>
+        </div>
+      </div>
+
       <div>
         <h3 class="chart-title" style="margin-bottom:2px">Comparativo semanal (lunes a domingo)</h3>
         <p class="auth-note" style="margin-bottom:4px">Con base en las fechas reales registradas en cada proyecto: emisión de factura, recepción de OC y facturación de recaudo.</p>
@@ -1104,11 +1450,46 @@ function renderAnalisis(){
 
       <div class="panel-row">
         <div class="chart-box chart-box-wide">
+          <h3 class="chart-title">Tiempos promedio entre etapas</h3>
+          <p class="auth-note" style="margin-bottom:10px">
+            Cuántos días tarda, en promedio, un proyecto en pasar de una etapa a la siguiente (solo se cuentan los proyectos que tienen registradas ambas fechas).
+            ${bottleneck ? ` El mayor cuello de botella actual es <strong>${esc(bottleneck.label)}</strong>, con un promedio de <strong>${bottleneck.avg} días</strong>.` : ''}
+          </p>
+          <div style="height:${timingsChartHeight}px">
+            <canvas id="chartTiempos"></canvas>
+          </div>
+          <div class="table-wrap" style="margin-top:14px">
+            <table class="data-table">
+              <thead><tr><th>Etapa</th><th>Promedio (días)</th><th>Proyectos con ambas fechas</th></tr></thead>
+              <tbody>
+                ${timings.map(t => `
+                  <tr${bottleneck && t.key===bottleneck.key ? ' style="background:#FDFBEF"' : ''}>
+                    <td class="cell-strong">${esc(t.label)}</td>
+                    <td>${t.avg===null ? '—' : `${t.avg} días`}</td>
+                    <td class="cell-sub">${t.n}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-row">
+        <div class="chart-box chart-box-wide">
           <h3 class="chart-title">Proyectos por ciudad</h3>
           <p class="auth-note" style="margin-bottom:10px">Total acumulado de proyectos abiertos en cada ciudad (${cityCount} ciudades), para ver dónde ha habido más apertura de tiendas.</p>
           <div style="height:${cityChartHeight}px">
             <canvas id="chartCiudad"></canvas>
           </div>
+        </div>
+      </div>
+
+      <div class="panel-row">
+        <div class="chart-box chart-box-wide">
+          <h3 class="chart-title">Mapa de proyectos por ciudad</h3>
+          <p class="auth-note" style="margin-bottom:10px">Ubicación aproximada de cada ciudad con proyectos; el tamaño del círculo representa cuántos proyectos hay allí.</p>
+          <div id="mapaCiudades" class="map-box"></div>
         </div>
       </div>
 
@@ -1378,6 +1759,7 @@ function renderModal(){
         ${!isNew ? `<p class="auth-note">Última modificación por <strong>${esc(d.lastModifiedBy||'—')}</strong>${d.lastModifiedAt ? ' el '+fmtDateTime(d.lastModifiedAt) : ''}</p>` : ''}
 
         <div class="modal-footer">
+          ${!isNew ? `<button type="button" class="btn btn-outline" data-action="export-project-pdf" data-id="${d.id}">Exportar a PDF</button>` : ''}
           ${readOnly
             ? `<button type="button" class="btn btn-primary" data-action="close-modal">Cerrar</button>`
             : `<button type="button" class="btn btn-text" data-action="close-modal">Cancelar</button>
@@ -1470,9 +1852,12 @@ function destroyCharts(){
 // Paleta y tipografía tomadas de las variables CSS de la app (--ink, --muted,
 // --line) para que los gráficos se sientan parte del mismo diseño y no un
 // añadido genérico de la librería.
-const CHART_INK = '#141414';
-const CHART_MUTED = '#6b6b63';
-const CHART_GRID = '#EDEAE0';
+// Las funciones (no constantes fijas) permiten que, si la persona cambia a
+// modo oscuro, los ejes/leyendas/tooltips de Chart.js se redibujen con
+// colores legibles sobre fondo oscuro en vez de quedar en tinta negra.
+function CHART_INK(){ return getTheme()==='dark' ? '#F1F0EA' : '#141414'; }
+function CHART_MUTED(){ return getTheme()==='dark' ? '#9a9a94' : '#6b6b63'; }
+function CHART_GRID(){ return getTheme()==='dark' ? '#34363A' : '#EDEAE0'; }
 const CHART_FONT = { family: "'Inter', -apple-system, sans-serif", size: 12 };
 
 // Tooltip y ejes con la misma apariencia "de papel" del resto de la app:
@@ -1480,12 +1865,12 @@ const CHART_FONT = { family: "'Inter', -apple-system, sans-serif", size: 12 };
 function elegantScales({ horizontal = false } = {}){
   const valueAxis = {
     beginAtZero: true,
-    ticks: { precision: 0, color: CHART_MUTED, font: CHART_FONT },
-    grid: { color: CHART_GRID, drawTicks: false },
+    ticks: { precision: 0, color: CHART_MUTED(), font: CHART_FONT },
+    grid: { color: CHART_GRID(), drawTicks: false },
     border: { display: false },
   };
   const categoryAxis = {
-    ticks: { color: CHART_INK, font: { ...CHART_FONT, weight: '600' } },
+    ticks: { color: CHART_INK(), font: { ...CHART_FONT, weight: '600' } },
     grid: { display: false },
     border: { display: false },
   };
@@ -1509,7 +1894,7 @@ function elegantLegend(show){
   return {
     display: show,
     position: 'bottom',
-    labels: { color: CHART_INK, font: CHART_FONT, boxWidth: 12, boxHeight: 12, padding: 16, usePointStyle: true, pointStyle: 'circle' },
+    labels: { color: CHART_INK(), font: CHART_FONT, boxWidth: 12, boxHeight: 12, padding: 16, usePointStyle: true, pointStyle: 'circle' },
   };
 }
 
@@ -1517,7 +1902,7 @@ function buildCharts(){
   destroyCharts();
   if (typeof Chart !== 'undefined'){
     Chart.defaults.font.family = CHART_FONT.family;
-    Chart.defaults.color = CHART_MUTED;
+    Chart.defaults.color = CHART_MUTED();
   }
   // Si por cualquier motivo la librería de gráficos no cargó (por ejemplo, sin
   // conexión a internet o un bloqueo de red), lo mostramos de forma visible en
@@ -1613,6 +1998,34 @@ function buildCharts(){
     });
   }
 
+  const elTiempos = document.getElementById('chartTiempos');
+  if (elTiempos){
+    const timings = computeStageTimings();
+    const maxAvg = Math.max(1, ...timings.map(t=>t.avg||0));
+    safeChart(elTiempos, 'tiempos', {
+      type:'bar',
+      data:{
+        labels: timings.map(t=>t.label),
+        datasets:[{
+          label:'Días promedio',
+          data: timings.map(t=>t.avg),
+          backgroundColor: timings.map(t => t.avg === maxAvg ? '#B3352A' : '#E08A2C'),
+          borderRadius:5, borderSkipped:false, maxBarThickness:26,
+        }]
+      },
+      options:{
+        responsive:true,
+        maintainAspectRatio:false,
+        indexAxis:'y',
+        plugins:{
+          legend: elegantLegend(false),
+          tooltip: elegantTooltip({ callbacks:{ label: (ctx) => ctx.raw===null ? 'Sin datos suficientes' : `${ctx.raw} días en promedio` } }),
+        },
+        scales: elegantScales({ horizontal:true }),
+      }
+    });
+  }
+
   const elContratistaCount = document.getElementById('chartContratistaCount');
   if (elContratistaCount){
     const contratistas = uniqueValues('contratista');
@@ -1637,6 +2050,15 @@ function buildCharts(){
 function afterAppRender(){
   if (activeTab === 'resumen' || activeTab === 'analisis'){
     requestAnimationFrame(buildCharts);
+  }
+  if (activeTab === 'mapa'){
+    requestAnimationFrame(buildMap);
+  } else if (mapInstance){
+    // Si se sale de la pestaña Mapa, liberamos la instancia de Leaflet:
+    // igual que con los gráficos, el <div> que ocupaba ya no existe tras el
+    // re-render de la pestaña nueva.
+    try{ mapInstance.remove(); }catch(e){}
+    mapInstance = null;
   }
 }
 
@@ -1690,6 +2112,16 @@ function onRootClick(e){
       userActionError = ''; userActionNotice = null;
       userModalState = { mode:'self', email: currentUser.email, draft:{} };
       render(); break;
+    case 'export-monthly-report': exportMonthlyReport(); break;
+    case 'export-project-pdf': {
+      const p = projects.find(x=>x.id===Number(btn.dataset.id));
+      if (p) exportProjectPDF(p);
+      break;
+    }
+    case 'toggle-theme': toggleTheme(); break;
+    case 'save-current-filter': saveCurrentFilterAsFavorite(); break;
+    case 'apply-saved-filter': applySavedFilter(Number(btn.dataset.filterId)); break;
+    case 'delete-saved-filter': deleteSavedFilter(Number(btn.dataset.filterId)); break;
     case 'logout':
       if (confirm('¿Estás seguro de que deseas salir de la aplicación?')) {
         currentUser=null; authView='login'; clearSession(); render();
@@ -1723,6 +2155,9 @@ function onRootClick(e){
     case 'clear-filters':
       filters = { estado:new Set(), contratista:'', ciudad:'', coordinador:'', search:'' };
       render(); break;
+    case 'save-current-filter': saveCurrentFilterAsFavorite(); break;
+    case 'apply-saved-filter': applySavedFilter(Number(btn.dataset.filterId)); break;
+    case 'delete-saved-filter': deleteSavedFilter(Number(btn.dataset.filterId)); break;
     case 'export-excel': exportExcel(); break;
     case 'export-audit': exportAuditLog(); break;
     case 'confirm-archive-audit': pendingArchiveAudit = true; render(); break;
@@ -2030,6 +2465,162 @@ async function doDelete(){
 }
 
 /* ---------- Exportar / Importar Excel ---------- */
+/* ---------- Ficha de proyecto en PDF ---------- */
+function fieldValueForPrint(f, p){
+  const raw = p[f.key];
+  if (f.type === 'date') return fmtDate(raw);
+  if (raw === null || raw === undefined || raw === '') return '—';
+  return String(raw);
+}
+function exportProjectPDF(p){
+  if (typeof window.jspdf === 'undefined'){
+    alert('No se pudo cargar la librería de PDF. Revisa tu conexión a internet y actualiza la página.');
+    return;
+  }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'pt', format:'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const marginX = 40;
+  let y = 48;
+
+  // Encabezado
+  doc.setFillColor(20,20,20);
+  doc.rect(0, 0, pageWidth, 70, 'F');
+  doc.setTextColor(255,255,255);
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(16);
+  doc.text('Ficha de proyecto', marginX, 30);
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(10);
+  doc.text('Syntesys Tecnológica S.A.S — Estado General de Proyectos DC', marginX, 48);
+  doc.setFontSize(9);
+  doc.text(`Generado el ${fmtDateTime(new Date().toISOString())}`, marginX, 62);
+  y = 96;
+
+  doc.setTextColor(20,20,20);
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(14);
+  doc.text(`${p.cliente || 'Proyecto sin nombre'} — ${p.sede || ''}`, marginX, y);
+  y += 18;
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(10);
+  doc.setTextColor(90,90,84);
+  doc.text(`Estado actual: ${p.estado || '—'}    ·    Avance consolidado: ${computeAvance(p)}%`, marginX, y);
+  y += 22;
+
+  FIELD_GROUPS.forEach(g => {
+    const body = g.fields.map(f => [f.label, fieldValueForPrint(f, p)]);
+    doc.autoTable({
+      startY: y,
+      margin: { left: marginX, right: marginX },
+      head: [[g.title, '']],
+      body,
+      theme: 'grid',
+      styles: { font:'helvetica', fontSize:9.5, cellPadding:5, textColor:[20,20,20], lineColor:[228,225,214] },
+      headStyles: { fillColor:[20,20,20], textColor:[246,213,0], fontStyle:'bold', fontSize:10 },
+      columnStyles: { 0:{ cellWidth:170, fontStyle:'bold' }, 1:{ cellWidth: pageWidth - marginX*2 - 170 } },
+      didParseCell: (data) => {
+        if (data.row.index === 0 && data.section === 'head' && data.column.index === 1){
+          data.cell.text = [];
+        }
+      },
+    });
+    y = doc.lastAutoTable.finalY + 16;
+    if (y > 740 && g !== FIELD_GROUPS[FIELD_GROUPS.length-1]){
+      doc.addPage();
+      y = 48;
+    }
+  });
+
+  // Avance de ejecución
+  if (y > 700){ doc.addPage(); y = 48; }
+  doc.autoTable({
+    startY: y,
+    margin: { left: marginX, right: marginX },
+    head: [['Avance de ejecución', '']],
+    body: [
+      ['Tubería', `${p.tuberia||0}%`],
+      ['Cableado', `${p.cableado||0}%`],
+      ['Equipos', `${p.equipos||0}%`],
+      ['Avance total (consolidado)', `${computeAvance(p)}%`],
+    ],
+    theme: 'grid',
+    styles: { font:'helvetica', fontSize:9.5, cellPadding:5, textColor:[20,20,20], lineColor:[228,225,214] },
+    headStyles: { fillColor:[20,20,20], textColor:[246,213,0], fontStyle:'bold', fontSize:10 },
+    columnStyles: { 0:{ cellWidth:170, fontStyle:'bold' }, 1:{ cellWidth: pageWidth - marginX*2 - 170 } },
+    didParseCell: (data) => {
+      if (data.row.index === 0 && data.section === 'head' && data.column.index === 1){
+        data.cell.text = [];
+      }
+    },
+  });
+  y = doc.lastAutoTable.finalY + 16;
+
+  if (p.lastModifiedAt){
+    doc.setFontSize(9);
+    doc.setTextColor(107,107,99);
+    doc.text(`Última modificación: ${p.lastModifiedBy || '—'} el ${fmtDateTime(p.lastModifiedAt)}`, marginX, y);
+  }
+
+  const safeName = (p.cliente || 'proyecto').replace(/[^\w\- ]+/g,'').trim().replace(/\s+/g,'_');
+  doc.save(`Ficha_${safeName || 'proyecto'}_${p.id}.pdf`);
+  logChange({ project: p.cliente || '—', text:`Exportó la ficha del proyecto "${p.cliente||'—'} — ${p.sede||''}" a PDF.` });
+}
+
+/* ---------- Reporte ejecutivo mensual (Excel multi-hoja) ---------- */
+function exportMonthlyReport(){
+  const wb = XLSX.utils.book_new();
+
+  const resumenRows = STATUSES.map(st => ({ Estado: st, Proyectos: projects.filter(p=>p.estado===st).length }));
+  resumenRows.push({ Estado: 'TOTAL', Proyectos: projects.length });
+  const wsResumen = XLSX.utils.json_to_sheet(resumenRows);
+  wsResumen['!cols'] = [{ wch:20 },{ wch:12 }];
+  XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen por estado');
+
+  const WEEKS_BACK = 8;
+  const buckets = buildWeeklyBuckets(WEEKS_BACK);
+  const facturadas = countByWeek('fEmisionFactura', buckets);
+  const ocRecibida = countByWeek('fRecepcionOC', buckets);
+  const recaudadas = countByWeek('fFacturacionRecaudo', buckets);
+  const semanalRows = buckets.map((b,i) => ({
+    Semana: b.label,
+    'Tiendas facturadas': facturadas[i],
+    'Tiendas con OC recibida': ocRecibida[i],
+    'Tiendas recaudadas': recaudadas[i],
+  }));
+  const wsSemanal = XLSX.utils.json_to_sheet(semanalRows);
+  wsSemanal['!cols'] = [{ wch:18 },{ wch:20 },{ wch:24 },{ wch:20 }];
+  XLSX.utils.book_append_sheet(wb, wsSemanal, 'Semanal');
+
+  const ciudadRows = uniqueValues('ciudad')
+    .map(c => ({ Ciudad: c, Proyectos: projects.filter(p=>p.ciudad===c).length }))
+    .sort((a,b) => b.Proyectos - a.Proyectos);
+  const wsCiudad = XLSX.utils.json_to_sheet(ciudadRows);
+  wsCiudad['!cols'] = [{ wch:24 },{ wch:12 }];
+  XLSX.utils.book_append_sheet(wb, wsCiudad, 'Por ciudad');
+
+  const contratistaRows = uniqueValues('contratista')
+    .map(c => ({ Contratista: c, Proyectos: projects.filter(p=>p.contratista===c).length }))
+    .sort((a,b) => b.Proyectos - a.Proyectos);
+  const wsContratista = XLSX.utils.json_to_sheet(contratistaRows);
+  wsContratista['!cols'] = [{ wch:28 },{ wch:12 }];
+  XLSX.utils.book_append_sheet(wb, wsContratista, 'Por contratista');
+
+  const timingRows = computeStageTimings().map(t => ({
+    'Etapa': t.label,
+    'Promedio (días)': t.avg === null ? '—' : t.avg,
+    'Proyectos con ambas fechas': t.n,
+  }));
+  const wsTiempos = XLSX.utils.json_to_sheet(timingRows);
+  wsTiempos['!cols'] = [{ wch:36 },{ wch:16 },{ wch:24 }];
+  XLSX.utils.book_append_sheet(wb, wsTiempos, 'Tiempos entre etapas');
+
+  const stamp = new Date().toISOString().slice(0,10);
+  const monthLabel = new Date().toLocaleDateString('es-CO', { month:'long', year:'numeric' });
+  XLSX.writeFile(wb, `Reporte_Ejecutivo_DC_${stamp}.xlsx`);
+  logChange({ project:'—', text:`Descargó el reporte ejecutivo mensual (${monthLabel}).` });
+}
+
 function exportExcel(){
   const rows = projects.map(p => {
     const row = {};

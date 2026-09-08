@@ -550,6 +550,12 @@ let authView = 'login';
 let authError = '';
 let charts = {};
 let mapInstance = null; // instancia de Leaflet de la pestaña Mapa
+// Coordenadas de ciudades resueltas automáticamente (ver geocodeCity más
+// abajo) para ciudades que NO están en el diccionario fijo CIUDAD_COORDS.
+// Se comparte entre todas las personas guardándose en Firestore junto con
+// los demás datos, así una ciudad nueva solo se busca una vez para siempre.
+let cityCoordsCache = {};
+const cityGeocodeAttempted = new Set(); // evita reintentos repetidos en la misma sesión si una ciudad no se pudo ubicar
 let pendingDeleteId = null;
 let pendingArchiveAudit = false;
 let pendingDeleteUserEmail = null;
@@ -750,6 +756,52 @@ const CIUDAD_COORDS = {
   'VILLETA':             [5.0111, -74.4736],
   'YOPAL':               [5.3378, -72.3959],
 };
+// Devuelve la coordenada de una ciudad combinando el diccionario fijo de
+// arriba con las que se hayan resuelto automáticamente (cityCoordsCache).
+function getCityCoords(cityName){
+  const key = (cityName || '').trim().toUpperCase();
+  if (!key) return null;
+  return CIUDAD_COORDS[key] || cityCoordsCache[key] || null;
+}
+// Geolocalización automática de ciudades nuevas: si un proyecto usa una
+// ciudad que no está en CIUDAD_COORDS ni ya se había resuelto antes, se
+// busca su coordenada con Nominatim (el geocodificador gratuito de
+// OpenStreetMap — igual que el mapa, no exige API key ni cuenta). Una vez
+// encontrada, se guarda en Firestore junto con los demás datos para que esa
+// ciudad quede disponible para siempre, para todas las personas, sin volver
+// a consultarla.
+// La cola con espera de ~1.1s entre solicitudes respeta la política de uso
+// justo de Nominatim (máximo 1 solicitud por segundo); como esto solo corre
+// para ciudades realmente nuevas (normalmente ninguna o muy pocas a la vez),
+// nunca genera un volumen de tráfico que la infrinja.
+let geocodeQueue = Promise.resolve();
+function geocodeCity(cityName){
+  const key = (cityName || '').trim().toUpperCase();
+  if (!key || getCityCoords(key) || cityGeocodeAttempted.has(key)) return;
+  cityGeocodeAttempted.add(key);
+  geocodeQueue = geocodeQueue
+    .then(() => new Promise(resolve => setTimeout(resolve, 1100)))
+    .then(async () => {
+      try{
+        const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=co&q=${encodeURIComponent(cityName + ', Colombia')}`;
+        const res = await fetch(url, { headers: { 'Accept-Language': 'es' } });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (Array.isArray(data) && data[0]){
+          const lat = parseFloat(data[0].lat), lon = parseFloat(data[0].lon);
+          if (!Number.isNaN(lat) && !Number.isNaN(lon)){
+            cityCoordsCache[key] = [lat, lon];
+            await storageSet('sy_dc_city_coords', cityCoordsCache);
+            // Si la persona sigue viendo la pestaña Mapa, se redibuja solo
+            // para que el punto nuevo aparezca sin recargar la página.
+            if (activeTab === 'mapa') buildMap();
+          }
+        }
+      }catch(err){
+        console.error('No se pudo geolocalizar la ciudad automáticamente:', cityName, err);
+      }
+    });
+}
 function cityProjectSummary(){
   const byCity = {};
   projects.forEach(p => {
@@ -839,11 +891,13 @@ async function storageSet(key, value){
 }
 
 async function loadAll(){
-  const [pRes, uRes, cRes] = await Promise.all([
+  const [pRes, uRes, cRes, geoRes] = await Promise.all([
     storageGet('sy_dc_projects'),
     storageGet('sy_dc_users'),
     storageGet('sy_dc_changelog'),
+    storageGet('sy_dc_city_coords'),
   ]);
+  if (geoRes.value && typeof geoRes.value === 'object') cityCoordsCache = geoRes.value;
 
   // "Marca de inicialización": una vez que la app ha sembrado los datos
   // por defecto una vez, esta clave queda en true para siempre. Si en una
@@ -946,10 +1000,11 @@ async function refreshData(){
   isRefreshing = true;
   render();
   try{
-    const [pRes, uRes, cRes] = await Promise.all([
+    const [pRes, uRes, cRes, geoRes] = await Promise.all([
       storageGet('sy_dc_projects'),
       storageGet('sy_dc_users'),
       storageGet('sy_dc_changelog'),
+      storageGet('sy_dc_city_coords'),
     ]);
     // Igual que en loadAll: si la lectura falló (pRes.ok/uRes.ok === false),
     // NO tocamos projects/users/changelog — así una falla momentánea de red
@@ -957,6 +1012,7 @@ async function refreshData(){
     if (Array.isArray(pRes.value)) projects = pRes.value;
     if (Array.isArray(uRes.value)) users = uRes.value;
     if (Array.isArray(cRes.value)) changelog = cRes.value;
+    if (geoRes.value && typeof geoRes.value === 'object') cityCoordsCache = { ...cityCoordsCache, ...geoRes.value };
     loadError = !pRes.ok || !uRes.ok || !cRes.ok;
 
     // Si el usuario actual fue editado (rol) o eliminado desde otra sesión,
@@ -1354,8 +1410,8 @@ function renderProyectosResults(list){
 /* ----- MAPA ----- */
 function renderMapa(){
   const summary = cityProjectSummary();
-  const withCoords = summary.filter(c => CIUDAD_COORDS[(c.ciudad||'').trim().toUpperCase()]);
-  const withoutCoords = summary.filter(c => !CIUDAD_COORDS[(c.ciudad||'').trim().toUpperCase()]);
+  const withCoords = summary.filter(c => getCityCoords(c.ciudad));
+  const withoutCoords = summary.filter(c => !getCityCoords(c.ciudad));
   return `
     <section class="panel">
       <div>
@@ -1365,7 +1421,7 @@ function renderMapa(){
       <div id="mapaProyectos" class="mapa-box"></div>
       ${withoutCoords.length ? `
         <p class="auth-note" style="margin-top:10px">
-          No se pudo ubicar en el mapa: ${withoutCoords.map(c=>esc(c.ciudad)).join(', ')} (ciudad sin coordenada registrada todavía).
+          Ubicando en el mapa automáticamente: ${withoutCoords.map(c=>esc(c.ciudad)).join(', ')}. Si en unos segundos no aparece, es una ciudad que el geocodificador no pudo reconocer con ese nombre.
         </p>
       ` : ''}
       <div class="table-wrap" style="margin-top:16px">
@@ -1421,8 +1477,15 @@ function buildMap(){
   summary.forEach(c => { if (c.total > maxTotal) maxTotal = c.total; });
 
   summary.forEach(c => {
-    const coords = CIUDAD_COORDS[(c.ciudad||'').trim().toUpperCase()];
-    if (!coords) return;
+    const coords = getCityCoords(c.ciudad);
+    if (!coords){
+      // Ciudad sin coordenada conocida todavía: se manda a la cola de
+      // geocodificación automática; cuando resuelva, buildMap() se vuelve a
+      // llamar solo (ver geocodeCity) y este círculo aparecerá sin que la
+      // persona tenga que hacer nada.
+      geocodeCity(c.ciudad);
+      return;
+    }
     const radius = 10 + (c.total / maxTotal) * 22;
     const marker = L.circleMarker(coords, {
       radius,

@@ -1149,7 +1149,7 @@ function deleteSavedFilter(id){
   render();
 }
 
-
+function renderProyectos(){
   const list = filteredProjects();
   const contratistas = uniqueValues('contratista');
   const ciudades = uniqueValues('ciudad');
@@ -1346,7 +1346,7 @@ function buildMap(){
   setTimeout(() => { try{ map.invalidateSize(); }catch(e){} }, 80);
 }
 
-
+function renderAnalisis(){
   const WEEKS_BACK = 8;
   const buckets = buildWeeklyBuckets(WEEKS_BACK);
   const facturadas = countByWeek('fEmisionFactura', buckets);

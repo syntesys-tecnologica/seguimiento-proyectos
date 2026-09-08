@@ -2030,9 +2030,8 @@ function CHART_INK(){ return getTheme()==='dark' ? '#F1F0EA' : '#141414'; }
 // hash simple del texto, así cada ciudad o contratista SIEMPRE tiene el
 // mismo color sin importar en qué posición quede al ordenar por cantidad, y
 // funciona para cualquier cantidad de barras (no depende de una paleta fija
-// que se quede corta). El tono varía, pero la saturación y luminosidad se
-// mantienen fijas para que todos los colores se vean con el mismo "peso"
-// visual, coherentes entre sí.
+// que se quede corta). Saturación baja y luminosidad media-alta para que la
+// gama se vea sobria y suave (tipo "pastel apagado"), no colores de neón.
 function categoricalColor(label){
   const str = String(label || '').toUpperCase();
   let hash = 0;
@@ -2040,7 +2039,7 @@ function categoricalColor(label){
     hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
   }
   const hue = hash % 360;
-  return `hsl(${hue}, 58%, ${getTheme()==='dark' ? 58 : 46}%)`;
+  return `hsl(${hue}, 32%, ${getTheme()==='dark' ? 52 : 54}%)`;
 }
 function CHART_MUTED(){ return getTheme()==='dark' ? '#9a9a94' : '#6b6b63'; }
 function CHART_GRID(){ return getTheme()==='dark' ? '#34363A' : '#EDEAE0'; }

@@ -2026,6 +2026,22 @@ function destroyCharts(){
 // modo oscuro, los ejes/leyendas/tooltips de Chart.js se redibujen con
 // colores legibles sobre fondo oscuro en vez de quedar en tinta negra.
 function CHART_INK(){ return getTheme()==='dark' ? '#F1F0EA' : '#141414'; }
+// Color categórico por nombre (ciudad, contratista, etc.): se deriva de un
+// hash simple del texto, así cada ciudad o contratista SIEMPRE tiene el
+// mismo color sin importar en qué posición quede al ordenar por cantidad, y
+// funciona para cualquier cantidad de barras (no depende de una paleta fija
+// que se quede corta). El tono varía, pero la saturación y luminosidad se
+// mantienen fijas para que todos los colores se vean con el mismo "peso"
+// visual, coherentes entre sí.
+function categoricalColor(label){
+  const str = String(label || '').toUpperCase();
+  let hash = 0;
+  for (let i = 0; i < str.length; i++){
+    hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
+  }
+  const hue = hash % 360;
+  return `hsl(${hue}, 58%, ${getTheme()==='dark' ? 58 : 46}%)`;
+}
 function CHART_MUTED(){ return getTheme()==='dark' ? '#9a9a94' : '#6b6b63'; }
 function CHART_GRID(){ return getTheme()==='dark' ? '#34363A' : '#EDEAE0'; }
 const CHART_FONT = { family: "'Inter', -apple-system, sans-serif", size: 12 };
@@ -2157,7 +2173,7 @@ function buildCharts(){
       .sort((a,b) => b.n - a.n);
     safeChart(elCiudad, 'ciudad', {
       type:'bar',
-      data:{ labels: paired.map(p=>p.c), datasets:[{ label:'Proyectos', data: paired.map(p=>p.n), backgroundColor:'#3B7DD8', borderRadius:5, borderSkipped:false, maxBarThickness:22 }] },
+      data:{ labels: paired.map(p=>p.c), datasets:[{ label:'Proyectos', data: paired.map(p=>p.n), backgroundColor: paired.map(p=>categoricalColor(p.c)), borderRadius:5, borderSkipped:false, maxBarThickness:22 }] },
       options:{
         responsive:true,
         maintainAspectRatio:false,
@@ -2210,7 +2226,7 @@ function buildCharts(){
       .sort((a,b) => b.n - a.n);
     safeChart(elContratistaCount, 'contratistaCount', {
       type:'bar',
-      data:{ labels: paired.map(p=>p.c), datasets:[{ label:'Proyectos', data: paired.map(p=>p.n), backgroundColor:'#7A5FC0', borderRadius:5, borderSkipped:false, maxBarThickness:22 }] },
+      data:{ labels: paired.map(p=>p.c), datasets:[{ label:'Proyectos', data: paired.map(p=>p.n), backgroundColor: paired.map(p=>categoricalColor(p.c)), borderRadius:5, borderSkipped:false, maxBarThickness:22 }] },
       options:{
         responsive:true,
         maintainAspectRatio:false,

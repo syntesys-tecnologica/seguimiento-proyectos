@@ -282,7 +282,7 @@ html[data-theme="dark"] .btn-text{ color:var(--muted); }
 
 /* ---------- Panels / charts ---------- */
 .panel-row{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-.chart-box{ background:var(--card); border:1px solid var(--line); padding:18px 20px 8px; border-radius:var(--r-md); box-shadow:var(--shadow-xs); }
+.chart-box{ background:var(--card); border:1px solid var(--line); padding:18px 20px 8px; border-radius:var(--r-md); box-shadow:var(--shadow-xs); min-width:0; }
 .chart-box-wide{ grid-column:1 / -1; }
 .kpi-row{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
 @media (max-width:860px){ .kpi-row{ grid-template-columns:1fr; } }
@@ -296,14 +296,24 @@ html[data-theme="dark"] .btn-text{ color:var(--muted); }
 .chart-title{ font-size:14px; font-weight:700; margin-bottom:12px; letter-spacing:-0.005em; }
 .chart-error{ color:var(--danger); font-size:12px; margin-top:8px; }
 
-/* Contenedores de altura fija para que los gráficos de barras se vean más
-   compactos tanto en PC como en móvil (antes crecían con el ancho de la
-   pantalla y quedaban demasiado altos). */
-.chart-canvas-box{ position:relative; height:220px; }
-.chart-canvas-box-lg{ position:relative; height:260px; }
+/* Contenedores de altura FIJA e IGUAL para TODOS los gráficos (barra normal
+   y con scroll), tanto en PC como en móvil, para que todas las tarjetas se
+   vean del mismo tamaño. La altura se calculó para que quepan las 6 barras
+   de "Tiempos promedio entre etapas" sin necesidad de hacer scroll. */
+.chart-canvas-box{ position:relative; height:340px; }
 @media (max-width:640px){
-  .chart-canvas-box{ height:170px; }
-  .chart-canvas-box-lg{ height:200px; }
+  .chart-canvas-box{ height:320px; }
+}
+
+/* Contenedor de altura FIJA e IGUAL al de arriba, con scroll interno cuando
+   el gráfico tiene más categorías de las que caben (ej. "Proyectos por
+   ciudad" con 28 ciudades). Así todas las tarjetas se ven del mismo tamaño
+   en pantalla, sin apretar las barras ni cortar etiquetas: el contenido
+   extra queda accesible haciendo scroll dentro de esa misma tarjeta. */
+.chart-canvas-scroll{ position:relative; height:340px; overflow-y:auto; overflow-x:hidden; }
+.chart-canvas-scroll-inner{ position:relative; }
+@media (max-width:640px){
+  .chart-canvas-scroll{ height:320px; }
 }
 
 .mapa-box{
@@ -381,6 +391,13 @@ html[data-theme="dark"] .status-chip{ color:var(--ink); }
 /* ---------- Table ---------- */
 .table-wrap{ overflow-x:auto; border:1px solid var(--line); background:var(--card); border-radius:var(--r-md); box-shadow:var(--shadow-xs); }
 .data-table{ width:100%; border-collapse:collapse; font-size:13px; min-width:900px; }
+/* Variante para tablas con pocas columnas (ej. "Detalle de tiempos por
+   etapa"): sin ancho mínimo forzado, así el texto de cada celda se ajusta
+   (wrap) al ancho disponible en vez de obligar a hacer scroll horizontal. */
+.data-table-compact{ min-width:0; table-layout:fixed; }
+.data-table-compact thead th{ white-space:normal; text-align:center; }
+.data-table-compact td, .data-table-compact th{ word-break:break-word; overflow-wrap:break-word; text-align:center; }
+.data-table-compact td:first-child, .data-table-compact th:first-child{ text-align:left; }
 .data-table thead th{
   text-align:left; padding:12px 14px; background:var(--paper); border-bottom:1px solid var(--line);
   font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); white-space:nowrap; font-weight:700;
@@ -557,6 +574,16 @@ let mapInstance = null; // instancia de Leaflet de la pestaña Mapa
 let cityCoordsCache = {};
 const cityGeocodeAttempted = new Set(); // evita reintentos repetidos en la misma sesión si una ciudad no se pudo ubicar
 let pendingDeleteId = null;
+/* ---------- Papelera de reciclaje ---------- */
+// Los proyectos "eliminados" no se borran de una vez: se mueven a este
+// arreglo (persistido aparte en Firestore) con la fecha y quién lo borró, y
+// se pueden restaurar durante 30 días. Pasado ese plazo se purgan solos la
+// próxima vez que la app cargue o se actualice (ver purgeOldTrash()).
+const TRASH_RETENTION_DAYS = 30;
+let trash = [];
+let trashPanelOpen = false;
+let pendingPurgeId = null;
+let pendingEmptyTrash = false;
 let pendingArchiveAudit = false;
 let pendingDeleteUserEmail = null;
 let userModalState = null; // { mode:'new'|'reset', email?, draft:{} }
@@ -891,13 +918,16 @@ async function storageSet(key, value){
 }
 
 async function loadAll(){
-  const [pRes, uRes, cRes, geoRes] = await Promise.all([
+  const [pRes, uRes, cRes, geoRes, trashRes] = await Promise.all([
     storageGet('sy_dc_projects'),
     storageGet('sy_dc_users'),
     storageGet('sy_dc_changelog'),
     storageGet('sy_dc_city_coords'),
+    storageGet('sy_dc_trash'),
   ]);
   if (geoRes.value && typeof geoRes.value === 'object') cityCoordsCache = geoRes.value;
+  if (Array.isArray(trashRes.value)) trash = trashRes.value;
+  if (purgeOldTrash()) await persistTrash();
 
   // "Marca de inicialización": una vez que la app ha sembrado los datos
   // por defecto una vez, esta clave queda en true para siempre. Si en una
@@ -990,6 +1020,21 @@ async function loadAll(){
 async function persistProjects(){ await storageSet('sy_dc_projects', projects); }
 async function persistUsers(){ await storageSet('sy_dc_users', users); }
 async function persistChangelog(){ await storageSet('sy_dc_changelog', changelog); }
+async function persistTrash(){ await storageSet('sy_dc_trash', trash); }
+// Elimina en silencio (sin pedir confirmación, no aplica) los elementos de
+// la papelera con más de TRASH_RETENTION_DAYS desde que se borraron. Se
+// llama cada vez que se carga o refresca la app; si de hecho purgó algo,
+// guarda el resultado para que quede igual para todas las personas.
+function purgeOldTrash(){
+  const limitMs = TRASH_RETENTION_DAYS * 86400000;
+  const now = Date.now();
+  const before = trash.length;
+  trash = trash.filter(t => {
+    const deletedAt = new Date(t.deletedAt).getTime();
+    return Number.isNaN(deletedAt) ? true : (now - deletedAt) < limitMs;
+  });
+  return trash.length !== before;
+}
 
 /* ---------- Actualizar (traer cambios hechos por otros usuarios) ---------- */
 // A diferencia de loadAll(), esta función NO toca la sesión activa ni la
@@ -1000,11 +1045,12 @@ async function refreshData(){
   isRefreshing = true;
   render();
   try{
-    const [pRes, uRes, cRes, geoRes] = await Promise.all([
+    const [pRes, uRes, cRes, geoRes, trashRes] = await Promise.all([
       storageGet('sy_dc_projects'),
       storageGet('sy_dc_users'),
       storageGet('sy_dc_changelog'),
       storageGet('sy_dc_city_coords'),
+      storageGet('sy_dc_trash'),
     ]);
     // Igual que en loadAll: si la lectura falló (pRes.ok/uRes.ok === false),
     // NO tocamos projects/users/changelog — así una falla momentánea de red
@@ -1013,6 +1059,8 @@ async function refreshData(){
     if (Array.isArray(uRes.value)) users = uRes.value;
     if (Array.isArray(cRes.value)) changelog = cRes.value;
     if (geoRes.value && typeof geoRes.value === 'object') cityCoordsCache = { ...cityCoordsCache, ...geoRes.value };
+    if (Array.isArray(trashRes.value)) trash = trashRes.value;
+    if (purgeOldTrash()) await persistTrash();
     loadError = !pRes.ok || !uRes.ok || !cRes.ok;
 
     // Si el usuario actual fue editado (rol) o eliminado desde otra sesión,
@@ -1150,6 +1198,9 @@ function renderApp(){
       </div>
       ${modalState ? renderModal() : ''}
       ${pendingDeleteId ? renderConfirmDelete() : ''}
+      ${trashPanelOpen ? renderTrashPanel() : ''}
+      ${pendingPurgeId ? renderConfirmPurgeItem() : ''}
+      ${pendingEmptyTrash ? renderConfirmEmptyTrash() : ''}
       ${userModalState ? renderUserModal() : ''}
       ${pendingDeleteUserEmail ? renderConfirmDeleteUser() : ''}
       ${pendingArchiveAudit ? renderConfirmArchiveAudit() : ''}
@@ -1195,7 +1246,8 @@ function renderTabs(){
 /* ----- RESUMEN ----- */
 function renderResumen(){
   const total = projects.length;
-  const avgAvance = total ? Math.round(projects.reduce((s,p)=>s+computeAvance(p),0)/total) : 0;
+  const recaudados = projects.filter(p => p.estado === 'RECAUDADO').length;
+  const avgAvance = total ? Math.round((recaudados/total)*100) : 0;
   const kpis = STATUSES.map(st => ({ st, count: projects.filter(p=>p.estado===st).length }));
 
   // Un perfil de usuario (no administrador) solo debe ver en "Últimas
@@ -1210,8 +1262,7 @@ function renderResumen(){
         <div class="kpi-card kpi-card-hero">
           <div class="kpi-hero-eyebrow">Avance general de la operación DC</div>
           <div class="kpi-hero-value">${avgAvance}%</div>
-          <div class="kpi-hero-label">Promedio de avance de tubería, cableado y equipos en todos los proyectos</div>
-          <div class="kpi-hero-sub">${total} proyectos tiendas DC en el sistema</div>
+          <div class="kpi-hero-sub">${recaudados} de ${total} proyectos recaudados · ${total-recaudados} por recaudar</div>
         </div>
         ${kpis.map(k => `
           <div class="kpi-card" style="border-left-color:${STATUS_COLORS[k.st]}">
@@ -1303,6 +1354,7 @@ function renderProyectos(){
   const contratistas = uniqueValues('contratista');
   const ciudades = uniqueValues('ciudad');
   const coordinadores = uniqueValues('coordinador');
+  const canManageTrash = currentUser && currentUser.role !== 'supervisor';
 
   return `
     <section class="panel">
@@ -1324,6 +1376,7 @@ function renderProyectos(){
           ${(filters.estado.size||filters.contratista||filters.ciudad||filters.coordinador||filters.search) ? '<button class="btn btn-text" data-action="clear-filters">Limpiar filtros</button>' : ''}
         </div>
         <div class="toolbar-right">
+          ${canManageTrash ? `<button class="btn btn-outline" data-action="open-trash">🗑️ Papelera${trash.length ? ` (${trash.length})` : ''}</button>` : ''}
           <button class="btn btn-outline" data-action="export-excel">Exportar a Excel</button>
           <button class="btn btn-primary" data-action="open-new-project">+ Nuevo proyecto</button>
         </div>
@@ -1532,31 +1585,14 @@ function renderAnalisis(){
     `;
   };
 
-  const deltaCell = (arr, i) => {
-    if (i === 0) return '<span class="cell-sub">—</span>';
-    const diff = arr[i] - arr[i-1];
-    const cls = diff > 0 ? 'delta-up' : diff < 0 ? 'delta-down' : 'delta-flat';
-    const sign = diff > 0 ? '+' : '';
-    return `<span class="kpi-delta ${cls}">${diff===0 ? '—' : sign+diff}</span>`;
-  };
-
-  const weeklyRows = buckets.map((b,i) => `
-    <tr${b.isCurrent ? ' style="background:#FDFBEF"' : ''}>
-      <td class="cell-strong">${esc(b.label)}${b.isCurrent ? ' <span class="cell-sub">(semana en curso)</span>' : ''}</td>
-      <td>${facturadas[i]} ${deltaCell(facturadas,i)}</td>
-      <td>${ocRecibida[i]} ${deltaCell(ocRecibida,i)}</td>
-      <td>${recaudadas[i]} ${deltaCell(recaudadas,i)}</td>
-    </tr>
-  `).join('');
-
   const cityCount = uniqueValues('ciudad').length;
-  const cityChartHeight = Math.max(280, cityCount * 26);
+  const cityChartHeight = Math.max(300, cityCount * 30);
   const contratistaCount = uniqueValues('contratista').length;
-  const contratistaChartHeight = Math.max(200, contratistaCount * 22);
+  const contratistaChartHeight = Math.max(300, contratistaCount * 30);
 
   const timings = computeStageTimings();
   const bottleneck = timings.filter(t=>t.avg!==null).sort((a,b)=>b.avg-a.avg)[0];
-  const timingsChartHeight = Math.max(220, timings.length * 46);
+  const timingsChartHeight = Math.max(280, timings.length * 60 + 30);
 
   return `
     <section class="panel">
@@ -1584,20 +1620,9 @@ function renderAnalisis(){
       <div class="panel-row">
         <div class="chart-box chart-box-wide">
           <h3 class="chart-title">Facturación, OC y recaudo — últimas ${WEEKS_BACK} semanas</h3>
-          <div class="chart-canvas-box-lg">
+          <div class="chart-canvas-box">
             <canvas id="chartSemanal"></canvas>
           </div>
-        </div>
-      </div>
-
-      <div>
-        <h3 class="chart-title" style="margin-bottom:8px">Detalle semana a semana</h3>
-        <p class="auth-note" style="margin-bottom:10px">Cada fila es una semana de lunes a domingo. La columna de la derecha de cada dato (▲/▼) compara esa semana contra la inmediatamente anterior; la semana en curso aún está incompleta.</p>
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead><tr><th>Semana</th><th>Tiendas facturadas</th><th>Tiendas con OC recibida</th><th>Tiendas recaudadas</th></tr></thead>
-            <tbody>${weeklyRows}</tbody>
-          </table>
         </div>
       </div>
 
@@ -1618,18 +1643,24 @@ function renderAnalisis(){
             Cuántos días tarda, en promedio, un proyecto en pasar de una etapa a la siguiente (solo se cuentan los proyectos que tienen registradas ambas fechas).
             ${bottleneck ? ` El mayor cuello de botella actual es <strong>${esc(bottleneck.label)}</strong>, con un promedio de <strong>${bottleneck.avg} días</strong>.` : ''}
           </p>
-          <div style="height:${timingsChartHeight}px">
+          <div class="chart-canvas-box" style="height:${timingsChartHeight}px">
             <canvas id="chartTiempos"></canvas>
           </div>
-          <div class="table-wrap" style="margin-top:14px">
-            <table class="data-table">
-              <thead><tr><th>Etapa</th><th>Promedio (días)</th><th>Proyectos con ambas fechas</th></tr></thead>
+        </div>
+      </div>
+
+      <div class="panel-row">
+        <div class="chart-box chart-box-wide">
+          <h3 class="chart-title">Detalle de tiempos por etapa</h3>
+          <p class="auth-note" style="margin-bottom:10px">Mismos datos del gráfico anterior, en formato de tabla. "Días prom." es el promedio de días entre etapas.</p>
+          <div class="table-wrap">
+            <table class="data-table data-table-compact">
+              <thead><tr><th style="width:70%">Etapa</th><th style="width:30%">Días prom.</th></tr></thead>
               <tbody>
                 ${timings.map(t => `
                   <tr${bottleneck && t.key===bottleneck.key ? ' style="background:#FDFBEF"' : ''}>
                     <td class="cell-strong">${esc(t.label)}</td>
-                    <td>${t.avg===null ? '—' : `${t.avg} días`}</td>
-                    <td class="cell-sub">${t.n}</td>
+                    <td>${t.avg===null ? '—' : t.avg}</td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -1642,8 +1673,10 @@ function renderAnalisis(){
         <div class="chart-box chart-box-wide">
           <h3 class="chart-title">Proyectos por ciudad</h3>
           <p class="auth-note" style="margin-bottom:10px">Total acumulado de proyectos abiertos en cada ciudad (${cityCount} ciudades), para ver dónde ha habido más apertura de tiendas.</p>
-          <div style="height:${cityChartHeight}px">
-            <canvas id="chartCiudad"></canvas>
+          <div class="chart-canvas-scroll">
+            <div class="chart-canvas-scroll-inner" style="height:${cityChartHeight}px">
+              <canvas id="chartCiudad"></canvas>
+            </div>
           </div>
         </div>
       </div>
@@ -1652,8 +1685,10 @@ function renderAnalisis(){
         <div class="chart-box chart-box-wide">
           <h3 class="chart-title">Proyectos por contratista (cantidad)</h3>
           <p class="auth-note" style="margin-bottom:10px">Total acumulado de proyectos que ha desarrollado cada contratista.</p>
-          <div style="height:${contratistaChartHeight}px">
-            <canvas id="chartContratistaCount"></canvas>
+          <div class="chart-canvas-scroll">
+            <div class="chart-canvas-scroll-inner" style="height:${contratistaChartHeight}px">
+              <canvas id="chartContratistaCount"></canvas>
+            </div>
           </div>
         </div>
       </div>
@@ -1985,10 +2020,95 @@ function renderConfirmDelete(){
     <div class="modal-card modal-card-sm" data-stop-close>
       <div class="modal-header"><h2>Eliminar proyecto</h2></div>
       <div class="modal-form">
-        <p>¿Seguro que deseas eliminar <strong>${esc(p.cliente)} — ${esc(p.sede)}</strong>? Esta acción no se puede deshacer.</p>
+        <p>¿Seguro que deseas eliminar <strong>${esc(p.cliente)} — ${esc(p.sede)}</strong>? Se moverá a la papelera y podrás restaurarlo durante ${TRASH_RETENTION_DAYS} días; después de eso se borra definitivamente.</p>
         <div class="modal-footer">
           <button class="btn btn-text" data-action="cancel-delete">Cancelar</button>
           <button class="btn btn-danger" data-action="do-delete">Eliminar</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ---------- Papelera de reciclaje ---------- */
+function daysLeftInTrash(deletedAt){
+  const deleted = new Date(deletedAt).getTime();
+  if (Number.isNaN(deleted)) return TRASH_RETENTION_DAYS;
+  const elapsedDays = (Date.now() - deleted) / 86400000;
+  return Math.max(0, Math.ceil(TRASH_RETENTION_DAYS - elapsedDays));
+}
+function renderTrashPanel(){
+  const sorted = [...trash].sort((a,b) => new Date(b.deletedAt) - new Date(a.deletedAt));
+  return `
+  <div class="modal-overlay" data-action="close-trash-overlay">
+    <div class="modal-card" data-stop-close>
+      <div class="modal-header">
+        <h2>Papelera de reciclaje</h2>
+        <button class="modal-close" data-action="close-trash">✕</button>
+      </div>
+      <div class="modal-form">
+        <p class="auth-note">Los proyectos eliminados quedan aquí durante ${TRASH_RETENTION_DAYS} días antes de borrarse definitivamente. Puedes restaurarlos en cualquier momento dentro de ese plazo.</p>
+        ${sorted.length ? `
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Cliente / Sede</th><th>Ciudad</th><th>Eliminado por</th><th>Se borra en</th><th></th></tr></thead>
+              <tbody>
+                ${sorted.map(t => {
+                  const left = daysLeftInTrash(t.deletedAt);
+                  return `
+                  <tr>
+                    <td>
+                      <div class="cell-strong">${esc(t.cliente||'—')}</div>
+                      <div class="cell-sub">${esc(t.sede||'—')}</div>
+                    </td>
+                    <td>${esc(t.ciudad||'—')}</td>
+                    <td class="cell-sub">${esc(t.deletedBy||'—')}<br/>${fmtDateTime(t.deletedAt)}</td>
+                    <td class="cell-sub">${left} día${left===1?'':'s'}</td>
+                    <td class="cell-actions">
+                      <button class="btn btn-text" data-action="restore-project" data-id="${t.id}">Restaurar</button>
+                      <button class="btn btn-text btn-text-danger" data-action="confirm-purge-item" data-id="${t.id}">Eliminar definitivamente</button>
+                    </td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        ` : `<p class="empty-row" style="padding:24px 0">La papelera está vacía.</p>`}
+        <div class="modal-footer">
+          ${sorted.length ? `<button class="btn btn-text btn-text-danger" data-action="confirm-empty-trash">Vaciar papelera</button>` : ''}
+          <button type="button" class="btn btn-outline" data-action="close-trash">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+function renderConfirmPurgeItem(){
+  const t = trash.find(x=>x.id===pendingPurgeId);
+  if (!t) return '';
+  return `
+  <div class="modal-overlay" data-action="cancel-purge-item">
+    <div class="modal-card modal-card-sm" data-stop-close>
+      <div class="modal-header"><h2>Eliminar definitivamente</h2></div>
+      <div class="modal-form">
+        <p>¿Eliminar para siempre <strong>${esc(t.cliente)} — ${esc(t.sede)}</strong>? Esta vez no se puede deshacer.</p>
+        <div class="modal-footer">
+          <button class="btn btn-text" data-action="cancel-purge-item">Cancelar</button>
+          <button class="btn btn-danger" data-action="do-purge-item">Eliminar definitivamente</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+function renderConfirmEmptyTrash(){
+  return `
+  <div class="modal-overlay" data-action="cancel-empty-trash">
+    <div class="modal-card modal-card-sm" data-stop-close>
+      <div class="modal-header"><h2>Vaciar papelera</h2></div>
+      <div class="modal-form">
+        <p>¿Eliminar para siempre los ${trash.length} proyecto${trash.length===1?'':'s'} de la papelera? Esta vez no se puede deshacer.</p>
+        <div class="modal-footer">
+          <button class="btn btn-text" data-action="cancel-empty-trash">Cancelar</button>
+          <button class="btn btn-danger" data-action="do-empty-trash">Vaciar papelera</button>
         </div>
       </div>
     </div>
@@ -2026,28 +2146,13 @@ function destroyCharts(){
 // modo oscuro, los ejes/leyendas/tooltips de Chart.js se redibujen con
 // colores legibles sobre fondo oscuro en vez de quedar en tinta negra.
 function CHART_INK(){ return getTheme()==='dark' ? '#F1F0EA' : '#141414'; }
-// Color categórico por nombre (ciudad, contratista, etc.): se deriva de un
-// hash simple del texto, así cada ciudad o contratista SIEMPRE tiene el
-// mismo color sin importar en qué posición quede al ordenar por cantidad, y
-// funciona para cualquier cantidad de barras (no depende de una paleta fija
-// que se quede corta). Saturación baja y luminosidad media-alta para que la
-// gama se vea sobria y suave (tipo "pastel apagado"), no colores de neón.
-function categoricalColor(label){
-  const str = String(label || '').toUpperCase();
-  let hash = 0;
-  for (let i = 0; i < str.length; i++){
-    hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
-  }
-  const hue = hash % 360;
-  return `hsl(${hue}, 32%, ${getTheme()==='dark' ? 52 : 54}%)`;
-}
 function CHART_MUTED(){ return getTheme()==='dark' ? '#9a9a94' : '#6b6b63'; }
 function CHART_GRID(){ return getTheme()==='dark' ? '#34363A' : '#EDEAE0'; }
 const CHART_FONT = { family: "'Inter', -apple-system, sans-serif", size: 12 };
 
 // Tooltip y ejes con la misma apariencia "de papel" del resto de la app:
 // fondo oscuro sólido, esquinas redondeadas, sin bordes duros en la grilla.
-function elegantScales({ horizontal = false } = {}){
+function elegantScales({ horizontal = false, noSkip = false } = {}){
   const valueAxis = {
     beginAtZero: true,
     ticks: { precision: 0, color: CHART_MUTED(), font: CHART_FONT },
@@ -2055,7 +2160,7 @@ function elegantScales({ horizontal = false } = {}){
     border: { display: false },
   };
   const categoryAxis = {
-    ticks: { color: CHART_INK(), font: { ...CHART_FONT, weight: '600' } },
+    ticks: { color: CHART_INK(), font: { ...CHART_FONT, weight: '600' }, autoSkip: !noSkip },
     grid: { display: false },
     border: { display: false },
   };
@@ -2172,7 +2277,7 @@ function buildCharts(){
       .sort((a,b) => b.n - a.n);
     safeChart(elCiudad, 'ciudad', {
       type:'bar',
-      data:{ labels: paired.map(p=>p.c), datasets:[{ label:'Proyectos', data: paired.map(p=>p.n), backgroundColor: paired.map(p=>categoricalColor(p.c)), borderRadius:5, borderSkipped:false, maxBarThickness:22 }] },
+      data:{ labels: paired.map(p=>p.c), datasets:[{ label:'Proyectos', data: paired.map(p=>p.n), backgroundColor:'#3B7DD8', borderRadius:5, borderSkipped:false, maxBarThickness:22 }] },
       options:{
         responsive:true,
         maintainAspectRatio:false,
@@ -2194,7 +2299,9 @@ function buildCharts(){
     safeChart(elTiempos, 'tiempos', {
       type:'bar',
       data:{
-        labels: timings.map(t=>t.label),
+        labels: timings.map(t => t.label.includes(' → ')
+          ? [t.label.split(' → ')[0] + ' →', t.label.split(' → ')[1]]
+          : t.label),
         datasets:[{
           label:'Días promedio',
           data: timings.map(t=>t.avg),
@@ -2212,7 +2319,7 @@ function buildCharts(){
           legend: elegantLegend(false),
           tooltip: elegantTooltip({ callbacks:{ label: (ctx) => ctx.raw===null ? 'Sin datos suficientes' : `${ctx.raw} días en promedio` } }),
         },
-        scales: elegantScales({ horizontal:true }),
+        scales: elegantScales({ horizontal:true, noSkip:true }),
       }
     });
   }
@@ -2225,7 +2332,7 @@ function buildCharts(){
       .sort((a,b) => b.n - a.n);
     safeChart(elContratistaCount, 'contratistaCount', {
       type:'bar',
-      data:{ labels: paired.map(p=>p.c), datasets:[{ label:'Proyectos', data: paired.map(p=>p.n), backgroundColor: paired.map(p=>categoricalColor(p.c)), borderRadius:5, borderSkipped:false, maxBarThickness:22 }] },
+      data:{ labels: paired.map(p=>p.c), datasets:[{ label:'Proyectos', data: paired.map(p=>p.n), backgroundColor:'#7A5FC0', borderRadius:5, borderSkipped:false, maxBarThickness:22 }] },
       options:{
         responsive:true,
         maintainAspectRatio:false,
@@ -2260,7 +2367,7 @@ root.addEventListener('change', onRootChange);
 root.addEventListener('input', onRootInput);
 
 function onRootClick(e){
-  const overlay = e.target.closest('[data-action="close-modal-overlay"], [data-action="cancel-delete"], [data-action="close-user-modal-overlay"], [data-action="cancel-delete-user"], [data-action="cancel-archive-audit"]');
+  const overlay = e.target.closest('[data-action="close-modal-overlay"], [data-action="cancel-delete"], [data-action="close-user-modal-overlay"], [data-action="cancel-delete-user"], [data-action="cancel-archive-audit"], [data-action="close-trash-overlay"], [data-action="cancel-purge-item"], [data-action="cancel-empty-trash"]');
   if (overlay && !e.target.closest('[data-stop-close]')){
     const a = overlay.dataset.action;
     if (a === 'close-modal-overlay'){ modalState = null; }
@@ -2268,6 +2375,9 @@ function onRootClick(e){
     else if (a === 'close-user-modal-overlay'){ userModalState = null; userActionError=''; }
     else if (a === 'cancel-delete-user'){ pendingDeleteUserEmail = null; }
     else if (a === 'cancel-archive-audit'){ pendingArchiveAudit = false; }
+    else if (a === 'close-trash-overlay'){ trashPanelOpen = false; }
+    else if (a === 'cancel-purge-item'){ pendingPurgeId = null; }
+    else if (a === 'cancel-empty-trash'){ pendingEmptyTrash = false; }
     render();
     return;
   }
@@ -2339,6 +2449,15 @@ function onRootClick(e){
     case 'confirm-delete': pendingDeleteId = Number(btn.dataset.id); render(); break;
     case 'cancel-delete': pendingDeleteId = null; render(); break;
     case 'do-delete': doDelete(); break;
+    case 'open-trash': trashPanelOpen = true; render(); break;
+    case 'close-trash': trashPanelOpen = false; render(); break;
+    case 'restore-project': restoreFromTrash(Number(btn.dataset.id)); break;
+    case 'confirm-purge-item': pendingPurgeId = Number(btn.dataset.id); render(); break;
+    case 'cancel-purge-item': pendingPurgeId = null; render(); break;
+    case 'do-purge-item': doPurgeTrashItem(); break;
+    case 'confirm-empty-trash': pendingEmptyTrash = true; render(); break;
+    case 'cancel-empty-trash': pendingEmptyTrash = false; render(); break;
+    case 'do-empty-trash': doEmptyTrash(); break;
     case 'toggle-estado-filter': {
       const st = btn.dataset.status;
       if (filters.estado.has(st)) filters.estado.delete(st); else filters.estado.add(st);
@@ -2655,10 +2774,48 @@ async function doDelete(){
   const p = projects.find(x=>x.id===pendingDeleteId);
   if (p){
     projects = projects.filter(x=>x.id!==pendingDeleteId);
-    logChange({ project: `${p.cliente||''} — ${p.sede||''}`, text: 'Eliminó el proyecto.' });
-    await persistProjects();
+    // No se borra para siempre: se mueve a la papelera con fecha y quién lo
+    // borró, y se puede restaurar durante TRASH_RETENTION_DAYS días.
+    trash.push({
+      ...p,
+      deletedAt: new Date().toISOString(),
+      deletedBy: currentUser ? currentUser.name : 'Desconocido',
+    });
+    logChange({ project: `${p.cliente||''} — ${p.sede||''}`, text: 'Eliminó el proyecto (movido a la papelera).' });
+    await Promise.all([persistProjects(), persistTrash()]);
   }
   pendingDeleteId = null;
+  render();
+}
+
+/* ---------- Papelera: restaurar / purgar ---------- */
+async function restoreFromTrash(id){
+  const t = trash.find(x => x.id === id);
+  if (!t) return;
+  trash = trash.filter(x => x.id !== id);
+  const { deletedAt, deletedBy, ...restored } = t;
+  // Si mientras estuvo en la papelera alguien más creó un proyecto nuevo con
+  // el mismo id (poco probable, pero posible), se le asigna uno nuevo para
+  // no pisar el otro registro.
+  if (projects.some(p => p.id === restored.id)) restored.id = nextId();
+  projects.push(restored);
+  logChange({ project: `${restored.cliente||''} — ${restored.sede||''}`, text: 'Restauró el proyecto desde la papelera.' });
+  await Promise.all([persistProjects(), persistTrash()]);
+  render();
+}
+async function doPurgeTrashItem(){
+  const t = trash.find(x => x.id === pendingPurgeId);
+  trash = trash.filter(x => x.id !== pendingPurgeId);
+  if (t) logChange({ project: `${t.cliente||''} — ${t.sede||''}`, text: 'Eliminó definitivamente el proyecto desde la papelera.' });
+  pendingPurgeId = null;
+  await persistTrash();
+  render();
+}
+async function doEmptyTrash(){
+  if (trash.length) logChange({ project:'—', text: `Vació la papelera (${trash.length} proyecto${trash.length===1?'':'s'} eliminado${trash.length===1?'':'s'} definitivamente).` });
+  trash = [];
+  pendingEmptyTrash = false;
+  await persistTrash();
   render();
 }
 
@@ -2897,7 +3054,7 @@ async function doArchiveAudit(){
 // Además conserva la posición del scroll para que la pantalla no salte.
 let autoRefreshTimer = null;
 function isUserCurrentlyEditing(){
-  if (modalState || userModalState || pendingDeleteId || pendingDeleteUserEmail) return true;
+  if (modalState || userModalState || pendingDeleteId || pendingDeleteUserEmail || trashPanelOpen || pendingPurgeId || pendingEmptyTrash) return true;
   const el = document.activeElement;
   if (!el) return false;
   return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT';

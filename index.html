@@ -1616,7 +1616,7 @@ function renderAnalisis(){
   const timings = computeStageTimings();
   const bottleneck = timings.filter(t=>t.avg!==null).sort((a,b)=>b.avg-a.avg)[0];
   const timingsChartHeight = Math.max(280, timings.length * 60 + 30);
-  const entregaLiquidacionTop = topProjectsByDateDelay('fEntrega', 'fLiquidacion', 8);
+  const entregaLiquidacionTop = topProjectsByDateDelay('fEntrega', 'fLiquidacion', 5);
 
   return `
     <section class="panel">

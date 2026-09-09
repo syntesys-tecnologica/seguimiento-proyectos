@@ -834,9 +834,10 @@ function cityProjectSummary(){
   projects.forEach(p => {
     const key = (p.ciudad || '').trim().toUpperCase();
     if (!key) return;
-    if (!byCity[key]) byCity[key] = { ciudad: p.ciudad, total:0, porEstado:{} };
+    if (!byCity[key]) byCity[key] = { ciudad: p.ciudad, total:0, porEstado:{}, proyectos:[] };
     byCity[key].total++;
     byCity[key].porEstado[p.estado || 'Sin estado'] = (byCity[key].porEstado[p.estado || 'Sin estado']||0) + 1;
+    byCity[key].proyectos.push({ nombre: `${p.cliente || 'Proyecto'} — ${p.sede || ''}`.replace(/ — $/, ''), estado: p.estado || 'Sin estado' });
   });
   return Object.values(byCity).sort((a,b)=>b.total-a.total);
 }
@@ -855,6 +856,24 @@ function computeStageTimings(){
     const avg = diffs.length ? Math.round(diffs.reduce((s,x)=>s+x,0) / diffs.length) : null;
     return { ...t, avg, n: diffs.length };
   });
+}
+
+// Devuelve los proyectos con más días transcurridos entre las dos fechas de
+// una etapa (ej. Entrega → OC recibida), de mayor a menor, para señalar
+// cuáles son los casos concretos detrás de un cuello de botella.
+function topProjectsByStageDelay(stageKey, limit = 8){
+  const stage = STAGE_TRANSITIONS.find(t => t.key === stageKey);
+  if (!stage) return [];
+  const rows = [];
+  projects.forEach(p => {
+    const a = parseDateSafe(p[stage.from]);
+    const b = parseDateSafe(p[stage.to]);
+    if (a && b){
+      const days = Math.round((b - a) / 86400000);
+      if (days >= 0) rows.push({ p, days });
+    }
+  });
+  return rows.sort((x,y) => y.days - x.days).slice(0, limit);
 }
 
 /* ---------- Almacenamiento persistente (Firebase Firestore) ---------- */
@@ -1551,8 +1570,13 @@ function buildMap(){
       .sort((a,b)=>b[1]-a[1])
       .map(([estado,n]) => `<div style="display:flex;justify-content:space-between;gap:10px"><span style="color:${STATUS_COLORS[estado]||'#666'}">●</span>&nbsp;${esc(estado)}<strong style="margin-left:auto">${n}</strong></div>`)
       .join('');
+    const listaProyectos = c.proyectos
+      .slice()
+      .sort((a,b)=>a.nombre.localeCompare(b.nombre))
+      .map(p => `<div style="display:flex;align-items:center;gap:6px;padding:3px 0"><span style="color:${STATUS_COLORS[p.estado]||'#666'};flex:none">●</span><span>${esc(p.nombre)}</span></div>`)
+      .join('');
     marker.bindTooltip(`${esc(c.ciudad)} · ${c.total} proyecto${c.total===1?'':'s'}`, { direction:'top' });
-    marker.bindPopup(`<div style="font-family:Inter,sans-serif;min-width:180px"><strong>${esc(c.ciudad)}</strong><br/><span style="color:#6b6b63;font-size:12px">${c.total} proyecto${c.total===1?'':'s'} en total</span><div style="margin-top:6px;font-size:12.5px">${detalle}</div></div>`);
+    marker.bindPopup(`<div style="font-family:Inter,sans-serif;min-width:180px;max-width:240px"><strong>${esc(c.ciudad)}</strong><br/><span style="color:#6b6b63;font-size:12px">${c.total} proyecto${c.total===1?'':'s'} en total</span><div style="margin-top:6px;font-size:12.5px">${detalle}</div><div style="margin-top:8px;padding-top:8px;border-top:1px solid #e5e3da;font-size:12px;max-height:150px;overflow-y:auto">${listaProyectos}</div></div>`);
   });
 
   mapInstance = map;
@@ -1593,6 +1617,7 @@ function renderAnalisis(){
   const timings = computeStageTimings();
   const bottleneck = timings.filter(t=>t.avg!==null).sort((a,b)=>b.avg-a.avg)[0];
   const timingsChartHeight = Math.max(280, timings.length * 60 + 30);
+  const entregaOcTop = topProjectsByStageDelay('entrega_oc', 8);
 
   return `
     <section class="panel">
@@ -1663,6 +1688,34 @@ function renderAnalisis(){
                     <td>${t.avg===null ? '—' : t.avg}</td>
                   </tr>
                 `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-row">
+        <div class="chart-box chart-box-wide">
+          <h3 class="chart-title">Proyectos con más días entre Entrega y OC recibida</h3>
+          <p class="auth-note" style="margin-bottom:10px">Los proyectos concretos detrás de ese cuello de botella, ordenados de mayor a menor número de días transcurridos entre la fecha de entrega y la recepción de la OC.</p>
+          <div class="table-wrap">
+            <table class="data-table data-table-compact">
+              <thead><tr><th style="width:50%">Proyecto</th><th style="width:25%">Días</th><th style="width:25%"></th></tr></thead>
+              <tbody>
+                ${entregaOcTop.length ? entregaOcTop.map(r => `
+                  <tr>
+                    <td class="cell-strong" style="text-align:left">
+                      ${esc(r.p.cliente||'Proyecto')} — ${esc(r.p.sede||'—')}
+                      <div class="cell-sub">${esc(r.p.ciudad||'—')}</div>
+                    </td>
+                    <td>${r.days}</td>
+                    <td>
+                      ${currentUser && currentUser.role === 'supervisor'
+                        ? `<button class="btn btn-text" data-action="open-view-project" data-id="${r.p.id}">Ver</button>`
+                        : `<button class="btn btn-text" data-action="open-edit-project" data-id="${r.p.id}">Editar</button>`}
+                    </td>
+                  </tr>
+                `).join('') : `<tr><td colspan="3" class="empty-row">No hay proyectos con ambas fechas registradas.</td></tr>`}
               </tbody>
             </table>
           </div>

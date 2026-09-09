@@ -858,16 +858,15 @@ function computeStageTimings(){
   });
 }
 
-// Devuelve los proyectos con más días transcurridos entre las dos fechas de
-// una etapa (ej. Entrega → OC recibida), de mayor a menor, para señalar
-// cuáles son los casos concretos detrás de un cuello de botella.
-function topProjectsByStageDelay(stageKey, limit = 8){
-  const stage = STAGE_TRANSITIONS.find(t => t.key === stageKey);
-  if (!stage) return [];
+// Devuelve los proyectos con más días transcurridos entre dos fechas
+// registradas en el proyecto (ej. entrega al cliente y liquidación al
+// cliente), de mayor a menor, para señalar cuáles son los casos concretos
+// detrás de un cuello de botella.
+function topProjectsByDateDelay(fromKey, toKey, limit = 8){
   const rows = [];
   projects.forEach(p => {
-    const a = parseDateSafe(p[stage.from]);
-    const b = parseDateSafe(p[stage.to]);
+    const a = parseDateSafe(p[fromKey]);
+    const b = parseDateSafe(p[toKey]);
     if (a && b){
       const days = Math.round((b - a) / 86400000);
       if (days >= 0) rows.push({ p, days });
@@ -1617,7 +1616,7 @@ function renderAnalisis(){
   const timings = computeStageTimings();
   const bottleneck = timings.filter(t=>t.avg!==null).sort((a,b)=>b.avg-a.avg)[0];
   const timingsChartHeight = Math.max(280, timings.length * 60 + 30);
-  const entregaOcTop = topProjectsByStageDelay('entrega_oc', 8);
+  const entregaLiquidacionTop = topProjectsByDateDelay('fEntrega', 'fLiquidacion', 8);
 
   return `
     <section class="panel">
@@ -1696,13 +1695,13 @@ function renderAnalisis(){
 
       <div class="panel-row">
         <div class="chart-box chart-box-wide">
-          <h3 class="chart-title">Proyectos con más días entre Entrega y OC recibida</h3>
-          <p class="auth-note" style="margin-bottom:10px">Los proyectos concretos detrás de ese cuello de botella, ordenados de mayor a menor número de días transcurridos entre la fecha de entrega y la recepción de la OC.</p>
+          <h3 class="chart-title">Proyectos con más días entre Entrega y Liquidación al cliente</h3>
+          <p class="auth-note" style="margin-bottom:10px">Los proyectos con mayor número de días transcurridos entre la fecha de entrega al cliente y la fecha de liquidación al cliente, de mayor a menor.</p>
           <div class="table-wrap">
             <table class="data-table data-table-compact">
               <thead><tr><th style="width:50%">Proyecto</th><th style="width:25%">Días</th><th style="width:25%"></th></tr></thead>
               <tbody>
-                ${entregaOcTop.length ? entregaOcTop.map(r => `
+                ${entregaLiquidacionTop.length ? entregaLiquidacionTop.map(r => `
                   <tr>
                     <td class="cell-strong" style="text-align:left">
                       ${esc(r.p.cliente||'Proyecto')} — ${esc(r.p.sede||'—')}

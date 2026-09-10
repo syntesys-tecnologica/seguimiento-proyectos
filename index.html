@@ -758,6 +758,7 @@ const STAGE_TRANSITIONS = [
   { key:'entrega_oc',     label:'Entrega → OC recibida',          from:'fEntrega',     to:'fRecepcionOC',      color:'#E08A2C' },
   { key:'oc_factura',     label:'OC recibida → Facturación',      from:'fRecepcionOC', to:'fEmisionFactura',   color:'#1B7F8C' },
   { key:'factura_recaudo',label:'Facturación → Recaudo',          from:'fEmisionFactura', to:'fFacturacionRecaudo', color:'#2E9E5B' },
+  { key:'inicio_recaudo', label:'Inicio de obra → Recaudo',       from:'fInicioObra',  to:'fFacturacionRecaudo', color:'#C23B6D' },
 ];
 /* ---------- Vista de mapa (proyectos por ciudad) ---------- */
 // Coordenadas aproximadas de las ciudades que aparecen hoy en la base de
@@ -865,7 +866,16 @@ function computeStageTimings(){
       }
     });
     const avg = diffs.length ? Math.round(diffs.reduce((s,x)=>s+x,0) / diffs.length) : null;
-    return { ...t, avg, n: diffs.length };
+    // Desviación estándar (muestral): qué tan dispersos están los días reales
+    // respecto al promedio. Un promedio bajo con desviación alta significa
+    // que hay casos muy por encima de lo normal escondidos detrás del número.
+    let stdDev = null;
+    if (diffs.length > 1){
+      const mean = diffs.reduce((s,x)=>s+x,0) / diffs.length;
+      const variance = diffs.reduce((s,x)=>s+(x-mean)*(x-mean),0) / (diffs.length - 1);
+      stdDev = Math.round(Math.sqrt(variance));
+    }
+    return { ...t, avg, stdDev, n: diffs.length };
   });
 }
 
@@ -1625,9 +1635,13 @@ function renderAnalisis(){
   const contratistaChartHeight = Math.max(300, contratistaCount * 30);
 
   const timings = computeStageTimings();
-  const bottleneck = timings.filter(t=>t.avg!==null).sort((a,b)=>b.avg-a.avg)[0];
+  // "Inicio de obra → Recaudo" es una métrica combinada (abarca varias
+  // etapas a la vez), así que se excluye del cálculo del cuello de botella
+  // para no compararla contra pasos individuales y falsear el resultado.
+  const bottleneck = timings.filter(t=>t.avg!==null && t.key!=='inicio_recaudo').sort((a,b)=>b.avg-a.avg)[0];
   const timingsChartHeight = Math.max(280, timings.length * 60 + 30);
   const entregaLiquidacionTop = topProjectsByDateDelay('fEntrega', 'fLiquidacion', 5);
+  const entregaOcAll = topProjectsByDateDelay('fEntrega', 'fRecepcionOC', Infinity);
 
   return `
     <section class="panel">
@@ -1687,17 +1701,46 @@ function renderAnalisis(){
       <div class="panel-row">
         <div class="chart-box chart-box-wide">
           <h3 class="chart-title">Detalle de tiempos por etapa</h3>
-          <p class="auth-note" style="margin-bottom:10px">Mismos datos del gráfico anterior, en formato de tabla. "Días prom." es el promedio de días entre etapas.</p>
+          <p class="auth-note" style="margin-bottom:10px">Mismos datos del gráfico anterior, en formato de tabla. "Días prom." es el promedio de días entre etapas; "Desviación" indica qué tan dispersos están los casos reales respecto a ese promedio (a mayor desviación, más variable es el tiempo real de un proyecto a otro).</p>
           <div class="table-wrap">
             <table class="data-table data-table-compact">
-              <thead><tr><th style="width:70%">Etapa</th><th style="width:30%">Días prom.</th></tr></thead>
+              <thead><tr><th style="width:52%">Etapa</th><th style="width:24%">Días prom.</th><th style="width:24%">Desviación</th></tr></thead>
               <tbody>
                 ${timings.map(t => `
                   <tr${bottleneck && t.key===bottleneck.key ? ' style="background:#FDFBEF"' : ''}>
                     <td class="cell-strong">${esc(t.label)}</td>
                     <td>${t.avg===null ? '—' : t.avg}</td>
+                    <td>${t.stdDev===null ? '—' : `± ${t.stdDev}`}</td>
                   </tr>
                 `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-row">
+        <div class="chart-box chart-box-wide">
+          <h3 class="chart-title">Datos reales — Entrega → OC recibida</h3>
+          <p class="auth-note" style="margin-bottom:10px">Todos los proyectos con ambas fechas registradas (no solo el promedio), de mayor a menor número de días entre la entrega y la recepción de la OC.</p>
+          <div class="table-wrap" style="max-height:320px; overflow-y:auto">
+            <table class="data-table data-table-compact">
+              <thead><tr><th style="width:50%">Proyecto</th><th style="width:25%">Días</th><th style="width:25%"></th></tr></thead>
+              <tbody>
+                ${entregaOcAll.length ? entregaOcAll.map(r => `
+                  <tr>
+                    <td class="cell-strong" style="text-align:left">
+                      ${esc(r.p.cliente||'Proyecto')} — ${esc(r.p.sede||'—')}
+                      <div class="cell-sub">${esc(r.p.ciudad||'—')}</div>
+                    </td>
+                    <td>${r.days}</td>
+                    <td>
+                      ${currentUser && currentUser.role === 'supervisor'
+                        ? `<button class="btn btn-text" data-action="open-view-project" data-id="${r.p.id}">Ver</button>`
+                        : `<button class="btn btn-text" data-action="open-edit-project" data-id="${r.p.id}">Editar</button>`}
+                    </td>
+                  </tr>
+                `).join('') : `<tr><td colspan="3" class="empty-row">No hay proyectos con ambas fechas registradas.</td></tr>`}
               </tbody>
             </table>
           </div>
@@ -2393,7 +2436,7 @@ function buildCharts(){
   const elTiempos = document.getElementById('chartTiempos');
   if (elTiempos){
     const timings = computeStageTimings();
-    const maxAvg = Math.max(1, ...timings.map(t=>t.avg||0));
+    const maxAvg = Math.max(1, ...timings.filter(t=>t.key!=='inicio_recaudo').map(t=>t.avg||0));
     // Cada etapa tiene su propio color (definido en STAGE_TRANSITIONS) para
     // distinguirlas de un vistazo; el cuello de botella (la etapa con más
     // días en promedio) se resalta con un borde rojo grueso en vez de
@@ -2419,7 +2462,14 @@ function buildCharts(){
         indexAxis:'y',
         plugins:{
           legend: elegantLegend(false),
-          tooltip: elegantTooltip({ callbacks:{ label: (ctx) => ctx.raw===null ? 'Sin datos suficientes' : `${ctx.raw} días en promedio` } }),
+          tooltip: elegantTooltip({ callbacks:{
+            label: (ctx) => ctx.raw===null ? 'Sin datos suficientes' : `${ctx.raw} días en promedio`,
+            afterLabel: (ctx) => {
+              const t = timings[ctx.dataIndex];
+              if (t.avg===null || t.stdDev===null) return '';
+              return `Desviación: ± ${t.stdDev} días (${t.n} proyectos)`;
+            }
+          } }),
         },
         scales: elegantScales({ horizontal:true, noSkip:true }),
       }
@@ -3066,10 +3116,11 @@ function exportMonthlyReport(){
   const timingRows = computeStageTimings().map(t => ({
     'Etapa': t.label,
     'Promedio (días)': t.avg === null ? '—' : t.avg,
+    'Desviación (días)': t.stdDev === null ? '—' : t.stdDev,
     'Proyectos con ambas fechas': t.n,
   }));
   const wsTiempos = XLSX.utils.json_to_sheet(timingRows);
-  wsTiempos['!cols'] = [{ wch:36 },{ wch:16 },{ wch:24 }];
+  wsTiempos['!cols'] = [{ wch:36 },{ wch:16 },{ wch:16 },{ wch:24 }];
   XLSX.utils.book_append_sheet(wb, wsTiempos, 'Tiempos entre etapas');
 
   const stamp = new Date().toISOString().slice(0,10);

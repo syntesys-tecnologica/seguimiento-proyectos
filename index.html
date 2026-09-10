@@ -865,17 +865,37 @@ function computeStageTimings(){
         if (days >= 0) diffs.push(days);
       }
     });
-    const avg = diffs.length ? Math.round(diffs.reduce((s,x)=>s+x,0) / diffs.length) : null;
-    // Desviación estándar (muestral): qué tan dispersos están los días reales
-    // respecto al promedio. Un promedio bajo con desviación alta significa
-    // que hay casos muy por encima de lo normal escondidos detrás del número.
-    let stdDev = null;
+
+    // Promedio "crudo" (con todos los datos) y su desviación estándar
+    // muestral: qué tan dispersos están los días reales respecto al
+    // promedio.
+    const avgRaw = diffs.length ? diffs.reduce((s,x)=>s+x,0) / diffs.length : null;
+    let stdDevRaw = null;
     if (diffs.length > 1){
-      const mean = diffs.reduce((s,x)=>s+x,0) / diffs.length;
-      const variance = diffs.reduce((s,x)=>s+(x-mean)*(x-mean),0) / (diffs.length - 1);
-      stdDev = Math.round(Math.sqrt(variance));
+      const variance = diffs.reduce((s,x)=>s+(x-avgRaw)*(x-avgRaw),0) / (diffs.length - 1);
+      stdDevRaw = Math.sqrt(variance);
     }
-    return { ...t, avg, stdDev, n: diffs.length };
+
+    // Se aplica la regla de ±2 desviaciones estándar para detectar y
+    // excluir los casos atípicos (proyectos parados por motivos ajenos al
+    // proceso normal) que distorsionan el promedio, y así entregar un
+    // promedio real más representativo de lo que pasa habitualmente.
+    let cleanDiffs = diffs;
+    let outliers = 0;
+    if (stdDevRaw !== null && stdDevRaw > 0){
+      const lower = avgRaw - 2 * stdDevRaw;
+      const upper = avgRaw + 2 * stdDevRaw;
+      cleanDiffs = diffs.filter(x => x >= lower && x <= upper);
+      outliers = diffs.length - cleanDiffs.length;
+    }
+
+    const avg = cleanDiffs.length
+      ? Math.round(cleanDiffs.reduce((s,x)=>s+x,0) / cleanDiffs.length)
+      : (avgRaw === null ? null : Math.round(avgRaw));
+    const avgOriginal = avgRaw === null ? null : Math.round(avgRaw);
+    const stdDev = stdDevRaw === null ? null : Math.round(stdDevRaw);
+
+    return { ...t, avg, avgOriginal, stdDev, outliers, n: diffs.length, nClean: cleanDiffs.length };
   });
 }
 
@@ -1394,6 +1414,7 @@ function renderProyectos(){
   const ciudades = uniqueValues('ciudad');
   const coordinadores = uniqueValues('coordinador');
   const canManageTrash = currentUser && currentUser.role !== 'supervisor';
+  const canCreateProject = currentUser && currentUser.role !== 'supervisor';
 
   return `
     <section class="panel">
@@ -1417,7 +1438,7 @@ function renderProyectos(){
         <div class="toolbar-right">
           ${canManageTrash ? `<button class="btn btn-outline" data-action="open-trash">🗑️ Papelera${trash.length ? ` (${trash.length})` : ''}</button>` : ''}
           <button class="btn btn-outline" data-action="export-excel">Exportar a Excel</button>
-          <button class="btn btn-primary" data-action="open-new-project">+ Nuevo proyecto</button>
+          ${canCreateProject ? '<button class="btn btn-primary" data-action="open-new-project">+ Nuevo proyecto</button>' : ''}
         </div>
       </div>
 
@@ -1641,7 +1662,6 @@ function renderAnalisis(){
   const bottleneck = timings.filter(t=>t.avg!==null && t.key!=='inicio_recaudo').sort((a,b)=>b.avg-a.avg)[0];
   const timingsChartHeight = Math.max(280, timings.length * 60 + 30);
   const entregaLiquidacionTop = topProjectsByDateDelay('fEntrega', 'fLiquidacion', 5);
-  const entregaOcAll = topProjectsByDateDelay('fEntrega', 'fRecepcionOC', Infinity);
 
   return `
     <section class="panel">
@@ -1689,8 +1709,8 @@ function renderAnalisis(){
         <div class="chart-box chart-box-wide">
           <h3 class="chart-title">Tiempos promedio entre etapas</h3>
           <p class="auth-note" style="margin-bottom:10px">
-            Cuántos días tarda, en promedio, un proyecto en pasar de una etapa a la siguiente (solo se cuentan los proyectos que tienen registradas ambas fechas).
-            ${bottleneck ? ` El mayor cuello de botella actual es <strong>${esc(bottleneck.label)}</strong>, con un promedio de <strong>${bottleneck.avg} días</strong>.` : ''}
+            Cuántos días tarda, en promedio, un proyecto en pasar de una etapa a la siguiente (solo se cuentan los proyectos que tienen registradas ambas fechas, excluyendo los casos atípicos que distorsionan el promedio).
+            ${bottleneck ? ` El mayor cuello de botella actual es <strong>${esc(bottleneck.label)}</strong>, con un promedio real de <strong>${bottleneck.avg} días</strong>.` : ''}
           </p>
           <div class="chart-canvas-box" style="height:${timingsChartHeight}px">
             <canvas id="chartTiempos"></canvas>
@@ -1701,7 +1721,7 @@ function renderAnalisis(){
       <div class="panel-row">
         <div class="chart-box chart-box-wide">
           <h3 class="chart-title">Detalle de tiempos por etapa</h3>
-          <p class="auth-note" style="margin-bottom:10px">Mismos datos del gráfico anterior, en formato de tabla. "Días prom." es el promedio de días entre etapas; "Desviación" indica qué tan dispersos están los casos reales respecto a ese promedio (a mayor desviación, más variable es el tiempo real de un proyecto a otro).</p>
+          <p class="auth-note" style="margin-bottom:10px">Mismos datos del gráfico anterior, en formato de tabla. "Días prom." es el promedio real de días entre etapas, ya depurado de valores atípicos (proyectos parados por motivos ajenos, más de 2 desviaciones estándar por encima o por debajo del resto de casos); "Desviación" indica qué tan dispersos están los casos considerados respecto a ese promedio.</p>
           <div class="table-wrap">
             <table class="data-table data-table-compact">
               <thead><tr><th style="width:52%">Etapa</th><th style="width:24%">Días prom.</th><th style="width:24%">Desviación</th></tr></thead>
@@ -1709,38 +1729,10 @@ function renderAnalisis(){
                 ${timings.map(t => `
                   <tr${bottleneck && t.key===bottleneck.key ? ' style="background:#FDFBEF"' : ''}>
                     <td class="cell-strong">${esc(t.label)}</td>
-                    <td>${t.avg===null ? '—' : t.avg}</td>
+                    <td>${t.avg===null ? '—' : t.avg}${t.outliers>0 ? `<div class="cell-sub">${t.outliers} atípico${t.outliers===1?'':'s'} excluido${t.outliers===1?'':'s'} (bruto: ${t.avgOriginal})</div>` : ''}</td>
                     <td>${t.stdDev===null ? '—' : `± ${t.stdDev}`}</td>
                   </tr>
                 `).join('')}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <div class="panel-row">
-        <div class="chart-box chart-box-wide">
-          <h3 class="chart-title">Datos reales — Entrega → OC recibida</h3>
-          <p class="auth-note" style="margin-bottom:10px">Todos los proyectos con ambas fechas registradas (no solo el promedio), de mayor a menor número de días entre la entrega y la recepción de la OC.</p>
-          <div class="table-wrap" style="max-height:320px; overflow-y:auto">
-            <table class="data-table data-table-compact">
-              <thead><tr><th style="width:50%">Proyecto</th><th style="width:25%">Días</th><th style="width:25%"></th></tr></thead>
-              <tbody>
-                ${entregaOcAll.length ? entregaOcAll.map(r => `
-                  <tr>
-                    <td class="cell-strong" style="text-align:left">
-                      ${esc(r.p.cliente||'Proyecto')} — ${esc(r.p.sede||'—')}
-                      <div class="cell-sub">${esc(r.p.ciudad||'—')}</div>
-                    </td>
-                    <td>${r.days}</td>
-                    <td>
-                      ${currentUser && currentUser.role === 'supervisor'
-                        ? `<button class="btn btn-text" data-action="open-view-project" data-id="${r.p.id}">Ver</button>`
-                        : `<button class="btn btn-text" data-action="open-edit-project" data-id="${r.p.id}">Editar</button>`}
-                    </td>
-                  </tr>
-                `).join('') : `<tr><td colspan="3" class="empty-row">No hay proyectos con ambas fechas registradas.</td></tr>`}
               </tbody>
             </table>
           </div>
@@ -2463,11 +2455,15 @@ function buildCharts(){
         plugins:{
           legend: elegantLegend(false),
           tooltip: elegantTooltip({ callbacks:{
-            label: (ctx) => ctx.raw===null ? 'Sin datos suficientes' : `${ctx.raw} días en promedio`,
+            label: (ctx) => ctx.raw===null ? 'Sin datos suficientes' : `${ctx.raw} días en promedio (real)`,
             afterLabel: (ctx) => {
               const t = timings[ctx.dataIndex];
-              if (t.avg===null || t.stdDev===null) return '';
-              return `Desviación: ± ${t.stdDev} días (${t.n} proyectos)`;
+              if (t.avg===null) return '';
+              const lines = [];
+              if (t.stdDev !== null) lines.push(`Desviación: ± ${t.stdDev} días`);
+              lines.push(`${t.nClean} proyecto${t.nClean===1?'':'s'} usados en el promedio`);
+              if (t.outliers > 0) lines.push(`${t.outliers} atípico${t.outliers===1?'':'s'} excluido${t.outliers===1?'':'s'} (promedio bruto: ${t.avgOriginal} días)`);
+              return lines;
             }
           } }),
         },
@@ -2584,6 +2580,10 @@ function onRootClick(e){
     case 'retry-load': refreshData(); break;
     case 'set-tab': activeTab = btn.dataset.tab; render(); break;
     case 'open-new-project':
+      // El perfil supervisor no puede crear proyectos nuevos (es de solo
+      // lectura); esto es un respaldo por si el botón llegara a dispararse
+      // sin estar visible.
+      if (currentUser && currentUser.role === 'supervisor') break;
       modalState = { id: null, draft: { id: nextId(), tuberia:0, cableado:0, equipos:0 } };
       render(); break;
     case 'open-edit-project': {

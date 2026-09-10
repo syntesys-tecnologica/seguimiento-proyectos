@@ -733,6 +733,17 @@ function countByWeek(dateField, buckets){
     return dd >= b.monday && dd <= b.sunday;
   }).length);
 }
+// Igual que countByWeek, pero en vez del conteo devuelve, por semana, los
+// nombres de los proyectos (cliente — sede) que caen en ese rango. Se usa
+// para mostrar el detalle de proyectos en el tooltip del gráfico semanal.
+function listByWeek(dateField, buckets){
+  return buckets.map(b => projects.filter(p => {
+    const d = parseDateSafe(p[dateField]);
+    if (!d) return false;
+    const dd = new Date(d); dd.setHours(0,0,0,0);
+    return dd >= b.monday && dd <= b.sunday;
+  }).map(p => `${p.cliente || 'Proyecto'} — ${p.sede || ''}`.replace(/ — $/, '')));
+}
 
 /* ---------- Indicador de tiempos promedio entre etapas ---------- */
 // Para detectar cuellos de botella: cuánto tarda, en promedio, un proyecto en
@@ -2270,6 +2281,12 @@ function buildCharts(){
   if (elSemanal){
     const WEEKS_BACK = 8;
     const buckets = buildWeeklyBuckets(WEEKS_BACK);
+    const datasetFields = ['fEmisionFactura', 'fRecepcionOC', 'fFacturacionRecaudo'];
+    const namesByField = {
+      fEmisionFactura: listByWeek('fEmisionFactura', buckets),
+      fRecepcionOC: listByWeek('fRecepcionOC', buckets),
+      fFacturacionRecaudo: listByWeek('fFacturacionRecaudo', buckets),
+    };
     safeChart(elSemanal, 'semanal', {
       type:'bar',
       data:{
@@ -2284,7 +2301,25 @@ function buildCharts(){
         responsive:true,
         maintainAspectRatio:false,
         interaction:{ mode:'index', intersect:false },
-        plugins:{ legend: elegantLegend(true), tooltip: elegantTooltip() },
+        plugins:{
+          legend: elegantLegend(true),
+          tooltip: elegantTooltip({
+            callbacks:{
+              // Debajo de cada línea ("Facturadas: 3", etc.) lista los
+              // proyectos concretos que componen ese número, para no tener
+              // que ir a buscarlos manualmente.
+              afterLabel: (item) => {
+                const field = datasetFields[item.datasetIndex];
+                const names = (namesByField[field] && namesByField[field][item.dataIndex]) || [];
+                if (!names.length) return '';
+                const MAX = 6;
+                const shown = names.slice(0, MAX).map(n => `• ${n}`);
+                if (names.length > MAX) shown.push(`+ ${names.length - MAX} más`);
+                return shown;
+              }
+            }
+          }),
+        },
         scales: elegantScales(),
       }
     });
@@ -2294,13 +2329,14 @@ function buildCharts(){
   if (elEstado){
     // Estado actual de los proyectos: total acumulado por estado, sin
     // comparación de periodos — una foto fija de cómo está la operación hoy.
+    const namesByStatus = STATUSES.map(st => projects.filter(p=>p.estado===st).map(p => `${p.cliente || 'Proyecto'} — ${p.sede || ''}`.replace(/ — $/, '')));
     safeChart(elEstado, 'estado', {
       type:'bar',
       data:{
         labels: STATUSES,
         datasets:[{
           label:'Proyectos',
-          data: STATUSES.map(st=>projects.filter(p=>p.estado===st).length),
+          data: namesByStatus.map(n=>n.length),
           backgroundColor: STATUSES.map(st=>STATUS_COLORS[st]),
           borderRadius:6,
           borderSkipped:false,
@@ -2310,7 +2346,21 @@ function buildCharts(){
       options:{
         responsive:true,
         maintainAspectRatio:false,
-        plugins:{ legend: elegantLegend(false), tooltip: elegantTooltip() },
+        plugins:{
+          legend: elegantLegend(false),
+          tooltip: elegantTooltip({
+            callbacks:{
+              afterLabel: (item) => {
+                const names = namesByStatus[item.dataIndex] || [];
+                if (!names.length) return '';
+                const MAX = 6;
+                const shown = names.slice(0, MAX).map(n => `• ${n}`);
+                if (names.length > MAX) shown.push(`+ ${names.length - MAX} más`);
+                return shown;
+              }
+            }
+          }),
+        },
         scales: elegantScales(),
       }
     });

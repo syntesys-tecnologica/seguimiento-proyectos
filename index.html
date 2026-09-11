@@ -1661,7 +1661,6 @@ function renderAnalisis(){
   // para no compararla contra pasos individuales y falsear el resultado.
   const bottleneck = timings.filter(t=>t.avg!==null && t.key!=='inicio_recaudo').sort((a,b)=>b.avg-a.avg)[0];
   const timingsChartHeight = Math.max(280, timings.length * 60 + 30);
-  const entregaLiquidacionTop = topProjectsByDateDelay('fEntrega', 'fLiquidacion', 5);
 
   return `
     <section class="panel">
@@ -1733,34 +1732,6 @@ function renderAnalisis(){
                     <td>${t.stdDev===null ? '—' : `± ${t.stdDev}`}</td>
                   </tr>
                 `).join('')}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <div class="panel-row">
-        <div class="chart-box chart-box-wide">
-          <h3 class="chart-title">Proyectos con más días entre Entrega y Liquidación al cliente</h3>
-          <p class="auth-note" style="margin-bottom:10px">Los proyectos con mayor número de días transcurridos entre la fecha de entrega al cliente y la fecha de liquidación al cliente, de mayor a menor.</p>
-          <div class="table-wrap">
-            <table class="data-table data-table-compact">
-              <thead><tr><th style="width:50%">Proyecto</th><th style="width:25%">Días</th><th style="width:25%"></th></tr></thead>
-              <tbody>
-                ${entregaLiquidacionTop.length ? entregaLiquidacionTop.map(r => `
-                  <tr>
-                    <td class="cell-strong" style="text-align:left">
-                      ${esc(r.p.cliente||'Proyecto')} — ${esc(r.p.sede||'—')}
-                      <div class="cell-sub">${esc(r.p.ciudad||'—')}</div>
-                    </td>
-                    <td>${r.days}</td>
-                    <td>
-                      ${currentUser && currentUser.role === 'supervisor'
-                        ? `<button class="btn btn-text" data-action="open-view-project" data-id="${r.p.id}">Ver</button>`
-                        : `<button class="btn btn-text" data-action="open-edit-project" data-id="${r.p.id}">Editar</button>`}
-                    </td>
-                  </tr>
-                `).join('') : `<tr><td colspan="3" class="empty-row">No hay proyectos con ambas fechas registradas.</td></tr>`}
               </tbody>
             </table>
           </div>
@@ -3196,9 +3167,9 @@ async function doArchiveAudit(){
   render();
 }
 
-/* ---------- Actualización automática silenciosa (cada 30s) ---------- */
+/* ---------- Actualización automática silenciosa (cada 60s) ---------- */
 // A diferencia del botón "Actualizar" (que muestra "Actualizando…" y es una
-// acción explícita), esta corre sola en segundo plano cada 30 segundos.
+// acción explícita), esta corre sola en segundo plano cada 60 segundos (1 minuto).
 // Para que NO afecte a la persona mientras trabaja, se salta por completo si:
 //   - hay un modal abierto (editando un proyecto, un usuario, o confirmando
 //     una eliminación) — no queremos pisarle lo que está a mitad de llenar.
@@ -3250,7 +3221,7 @@ async function silentAutoRefresh(){
 }
 function startAutoRefresh(){
   if (autoRefreshTimer) return;
-  autoRefreshTimer = setInterval(silentAutoRefresh, 30000);
+  autoRefreshTimer = setInterval(silentAutoRefresh, 60000);
 }
 
 /* ---------- Arranque ---------- */

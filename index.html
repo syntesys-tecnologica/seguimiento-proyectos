@@ -391,13 +391,6 @@ html[data-theme="dark"] .status-chip{ color:var(--ink); }
 /* ---------- Table ---------- */
 .table-wrap{ overflow-x:auto; border:1px solid var(--line); background:var(--card); border-radius:var(--r-md); box-shadow:var(--shadow-xs); }
 .data-table{ width:100%; border-collapse:collapse; font-size:13px; min-width:900px; }
-/* Variante para tablas con pocas columnas (ej. "Detalle de tiempos por
-   etapa"): sin ancho mínimo forzado, así el texto de cada celda se ajusta
-   (wrap) al ancho disponible en vez de obligar a hacer scroll horizontal. */
-.data-table-compact{ min-width:0; table-layout:fixed; }
-.data-table-compact thead th{ white-space:normal; text-align:center; }
-.data-table-compact td, .data-table-compact th{ word-break:break-word; overflow-wrap:break-word; text-align:center; }
-.data-table-compact td:first-child, .data-table-compact th:first-child{ text-align:left; }
 .data-table thead th{
   text-align:left; padding:12px 14px; background:var(--paper); border-bottom:1px solid var(--line);
   font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); white-space:nowrap; font-weight:700;
@@ -407,6 +400,15 @@ html[data-theme="dark"] .status-chip{ color:var(--ink); }
 .data-table tbody tr:last-child td{ border-bottom:none; }
 .data-table tbody tr:hover{ background:#FDFBEF; }
 html[data-theme="dark"] .data-table tbody tr:hover{ background:#242118; }
+/* Variante para tablas con pocas columnas (ej. "Detalle de tiempos por
+   etapa"): sin ancho mínimo forzado, así el texto de cada celda se ajusta
+   (wrap) al ancho disponible en vez de obligar a hacer scroll horizontal.
+   Va DESPUÉS de las reglas base de .data-table para poder sobreescribir su
+   alineación (si quedara antes, con la misma especificidad, perdería). */
+.data-table-compact{ min-width:0; table-layout:fixed; }
+.data-table-compact thead th{ white-space:normal; text-align:center; }
+.data-table-compact td, .data-table-compact th{ word-break:break-word; overflow-wrap:break-word; text-align:center; }
+.data-table-compact td:first-child, .data-table-compact th:first-child{ text-align:left; }
 .cell-strong{ font-weight:700; }
 .cell-sub{ color:var(--muted); font-size:12px; }
 .cell-actions{ white-space:nowrap; text-align:right; }

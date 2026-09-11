@@ -1203,31 +1203,20 @@ function renderAuth(){
     </div>
   </div>`;
 }
-  
+
 function authLoginView(){
   return `
     <form data-action-submit="do-login" class="auth-form">
       ${authError ? `<div class="auth-error">${esc(authError)}</div>` : ''}
-
       <label class="field-label">Correo corporativo</label>
       <input class="text-input" type="email" name="email" placeholder="nombre@syntesys.co" required />
-
       <label class="field-label">Contraseña</label>
       <input class="text-input" type="password" name="password" placeholder="••••••••" required />
-
       <button class="btn btn-primary btn-block" type="submit">Ingresar</button>
-
       <div class="auth-links">
       </div>
     </form>
-
-    <p class="auth-hint">
-      Si perdiste tus credenciales, contacta al administrador de la plataforma.
-      <br><br>
-      <a href="mailto:andres.florez@syntesys.co">
-        andres.florez@syntesys.co
-      </a>
-    </p>
+    <p class="auth-hint">Si perdiste tus credenciales, contacta al administrador de la plataforma.</p>
   `;
 }
 

@@ -157,6 +157,16 @@ html[data-theme="dark"] .field-label{ color:var(--muted); }
 .auth-links a{ text-decoration:none; color:var(--charcoal); border-bottom:1px solid var(--line); transition:color .15s var(--ease), border-color .15s var(--ease); }
 .auth-links a:hover{ color:var(--ink); border-color:var(--ink); }
 .auth-hint{ margin-top:20px; font-size:12px; color:var(--muted); text-align:center; line-height:1.6; }
+.auth-hint a{ display:inline-block; margin-top:4px; color:var(--accent, #7A5FC0); font-weight:600; text-decoration:underline; }
+.password-field{ position:relative; display:flex; }
+.password-field .text-input{ padding-right:40px; }
+.password-toggle{
+  position:absolute; right:4px; top:50%; transform:translateY(-50%);
+  border:none; background:transparent; cursor:pointer;
+  display:flex; align-items:center; justify-content:center;
+  color:var(--muted); padding:6px 8px; border-radius:6px;
+}
+.password-toggle:hover{ color:var(--ink, #141414); background:var(--paper); }
 .auth-note{ font-size:13px; color:var(--muted); line-height:1.5; }
 .auth-error{ background:var(--danger-bg); color:var(--danger); font-size:13px; padding:10px 12px; border-left:3px solid var(--danger); margin-bottom:4px; border-radius:0 var(--r-sm) var(--r-sm) 0; }
 .auth-simulated-email{ background:#FFFBE0; border:1px dashed var(--yellow-dark); padding:14px 16px; margin-bottom:16px; border-radius:var(--r-sm); }
@@ -1187,6 +1197,12 @@ function render(){
 }
 
 /* ================= AUTENTICACIÓN ================= */
+// Íconos de "mostrar/ocultar contraseña" (ojo / ojo tachado), en SVG en vez
+// de emoji para que se vean consistentes y profesionales en cualquier
+// dispositivo (los emoji varían mucho de estilo entre sistema operativos).
+const ICON_EYE = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
+const ICON_EYE_OFF = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a18.5 18.5 0 0 1 5.06-5.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 7 11 7a18.5 18.5 0 0 1-2.16 3.19M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+
 function renderAuth(){
   let body = '';
   if (authView === 'login') body = authLoginView();
@@ -1211,12 +1227,18 @@ function authLoginView(){
       <label class="field-label">Correo corporativo</label>
       <input class="text-input" type="email" name="email" placeholder="nombre@syntesys.co" required />
       <label class="field-label">Contraseña</label>
-      <input class="text-input" type="password" name="password" placeholder="••••••••" required />
+      <div class="password-field">
+        <input class="text-input" type="password" name="password" placeholder="••••••••" required />
+        <button type="button" class="password-toggle" data-action="toggle-password-visibility" data-target="password" title="Mostrar contraseña" aria-label="Mostrar contraseña">${ICON_EYE}</button>
+      </div>
       <button class="btn btn-primary btn-block" type="submit">Ingresar</button>
       <div class="auth-links">
       </div>
     </form>
-    <p class="auth-hint">Si perdiste tus credenciales, contacta al administrador de la plataforma.</p>
+    <p class="auth-hint">
+      Si perdiste tus credenciales, contacta al administrador de la plataforma.<br/>
+      <a href="mailto:andres.florez@syntesys.co">andres.florez@syntesys.co</a>
+    </p>
   `;
 }
 
@@ -2504,6 +2526,23 @@ function onRootClick(e){
   const action = btn.dataset.action;
 
   switch(action){
+    case 'toggle-password-visibility': {
+      // Igual que 'clear-date': se manipula el input directamente y se
+      // corta con return, SIN llamar a render(). Si pasara por render(),
+      // el innerHTML del formulario se reconstruye desde cero y la
+      // contraseña que la persona ya había escrito se perdería.
+      const wrapper = btn.closest('.password-field');
+      const input = wrapper && wrapper.querySelector(`input[name="${btn.dataset.target}"]`);
+      if (input){
+        const isHidden = input.type === 'password';
+        input.type = isHidden ? 'text' : 'password';
+        btn.innerHTML = isHidden ? ICON_EYE_OFF : ICON_EYE;
+        const label = isHidden ? 'Ocultar contraseña' : 'Mostrar contraseña';
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+      }
+      return;
+    }
     case 'clear-date': {
       const input = btn.parentElement.querySelector(`input[name="${btn.dataset.target}"]`);
       if (input){

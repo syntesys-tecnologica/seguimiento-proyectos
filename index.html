@@ -2399,11 +2399,9 @@ function buildCharts(){
   const elTiempos = document.getElementById('chartTiempos');
   if (elTiempos){
     const timings = computeStageTimings();
-    const maxAvg = Math.max(1, ...timings.filter(t=>t.key!=='inicio_recaudo').map(t=>t.avg||0));
     // Cada etapa tiene su propio color (definido en STAGE_TRANSITIONS) para
-    // distinguirlas de un vistazo; el cuello de botella (la etapa con más
-    // días en promedio) se resalta con un borde rojo grueso en vez de
-    // taparle su color, así se conservan ambas lecturas a la vez.
+    // distinguirlas de un vistazo. Ya no se resalta ninguna barra con un
+    // borde aparte: todas se muestran de forma uniforme.
     safeChart(elTiempos, 'tiempos', {
       type:'bar',
       data:{
@@ -2414,8 +2412,6 @@ function buildCharts(){
           label:'Días promedio',
           data: timings.map(t=>t.avg),
           backgroundColor: timings.map(t => t.color),
-          borderColor: timings.map(t => t.avg === maxAvg && t.avg > 0 ? '#B3352A' : t.color),
-          borderWidth: timings.map(t => t.avg === maxAvg && t.avg > 0 ? 3 : 0),
           borderRadius:5, borderSkipped:false, maxBarThickness:26,
         }]
       },

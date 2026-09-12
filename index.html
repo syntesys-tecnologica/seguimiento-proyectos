@@ -2622,40 +2622,108 @@ function chatFmtTime(ts){
     : `${d.toLocaleDateString('es-CO', { day:'2-digit', month:'2-digit' })} ${d.toLocaleTimeString('es-CO', { hour:'2-digit', minute:'2-digit' })}`;
 }
 
+// Sonido de notificación: se genera con el navegador (dos tonos cortos,
+// tipo "ding"), sin depender de ningún archivo de audio externo — así
+// funciona igual de bien sin conexión, como el resto de esta PWA.
+let chatAudioCtx = null;
+function playChatNotificationSound(){
+  try{
+    if (!chatAudioCtx) chatAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (chatAudioCtx.state === 'suspended') chatAudioCtx.resume().catch(()=>{});
+    const ctx = chatAudioCtx;
+    const now = ctx.currentTime;
+    [[880, 0], [1108, 0.09]].forEach(([freq, delay]) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0, now + delay);
+      gain.gain.linearRampToValueAtTime(0.18, now + delay + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.22);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + delay);
+      osc.stop(now + delay + 0.24);
+    });
+  }catch(e){
+    console.error('No se pudo reproducir el sonido de notificación del chat', e);
+  }
+}
+
+// Notificación del sistema operativo (fuera del navegador) cuando la
+// pestaña está en segundo plano — pide permiso una sola vez, y solo se
+// muestra si la persona no está mirando la ventana en ese momento (si la
+// tiene activa, ya ve/oye el mensaje sin necesidad de esto).
+function requestChatNotificationPermission(){
+  if (typeof Notification === 'undefined') return;
+  if (Notification.permission === 'default') Notification.requestPermission().catch(()=>{});
+}
+function showChatBrowserNotification(msg){
+  try{
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    if (!document.hidden && document.hasFocus()) return;
+    const title = msg.room === 'general' ? `${msg.fromName} (Chat general)` : msg.fromName;
+    const notif = new Notification(title, { body: msg.text, tag: `chat-${msg.room}` });
+    notif.onclick = () => { window.focus(); notif.close(); };
+  }catch(e){
+    console.error('No se pudo mostrar la notificación del chat', e);
+  }
+}
+
 async function startChatWidget(){
   if (chatStarted || !currentUser) return;
   chatStarted = true;
   renderChatWidget();
+  requestChatNotificationPermission();
   try{
     const { db, collection, query, where, onSnapshot } = await getFirebase();
     const col = collection(db, 'chat_messages');
 
-    const applySnapshot = (snap) => {
-      snap.docChanges().forEach(change => {
-        const data = change.doc.data();
-        const msg = {
-          id: change.doc.id,
-          room: data.room,
-          participants: data.participants || [],
-          fromEmail: data.fromEmail,
-          fromName: data.fromName,
-          text: data.text,
-          ts: data.ts || 0,
-        };
-        if (!chatMessagesByRoom[msg.room]) chatMessagesByRoom[msg.room] = [];
-        const list = chatMessagesByRoom[msg.room];
-        const idx = list.findIndex(m => m.id === msg.id);
-        if (change.type === 'removed'){
-          if (idx !== -1) list.splice(idx, 1);
-        } else if (idx !== -1){
-          list[idx] = msg;
-        } else {
-          list.push(msg);
-        }
-        list.sort((a,b) => a.ts - b.ts);
-      });
-      chatOnMessagesChanged();
-    };
+    // Cada listener (sala general y mensajes privados) lleva su propio
+    // control de "primera carga": Firestore entrega TODO el historial como
+    // cambios tipo 'added' la primera vez que se conecta, y no queremos
+    // sonar la notificación para mensajes viejos al abrir la app.
+    function makeSnapshotHandler(){
+      let isFirstSnapshot = true;
+      return (snap) => {
+        let shouldPlaySound = false;
+        snap.docChanges().forEach(change => {
+          const data = change.doc.data();
+          const msg = {
+            id: change.doc.id,
+            room: data.room,
+            participants: data.participants || [],
+            fromEmail: data.fromEmail,
+            fromName: data.fromName,
+            text: data.text,
+            ts: data.ts || 0,
+          };
+          if (!chatMessagesByRoom[msg.room]) chatMessagesByRoom[msg.room] = [];
+          const list = chatMessagesByRoom[msg.room];
+          const idx = list.findIndex(m => m.id === msg.id);
+          if (change.type === 'removed'){
+            if (idx !== -1) list.splice(idx, 1);
+          } else if (idx !== -1){
+            list[idx] = msg;
+          } else {
+            list.push(msg);
+            // Solo suena si: no es la carga inicial del historial, el
+            // mensaje no es propio, y no estás ya mirando esa misma
+            // conversación (ahí ya lo ves aparecer en vivo, no hace falta
+            // avisarte con sonido).
+            const alreadyViewingThisThread = chatOpen && chatView === 'thread' && chatActiveRoom === msg.room;
+            if (!isFirstSnapshot && msg.fromEmail !== currentUser.email && !alreadyViewingThisThread){
+              shouldPlaySound = true;
+              showChatBrowserNotification(msg);
+            }
+          }
+          list.sort((a,b) => a.ts - b.ts);
+        });
+        isFirstSnapshot = false;
+        if (shouldPlaySound) playChatNotificationSound();
+        chatOnMessagesChanged();
+      };
+    }
 
     // Dos escuchas en vivo en vez de una sola: así se evita tener que
     // combinar filtros distintos (sala general vs. participantes de un
@@ -2663,9 +2731,9 @@ async function startChatWidget(){
     // índice compuesto manualmente en la consola — con dos escuchas simples
     // no hace falta ninguna configuración adicional aparte de las reglas de
     // seguridad.
-    chatUnsubs.push(onSnapshot(query(col, where('room', '==', 'general')), applySnapshot,
+    chatUnsubs.push(onSnapshot(query(col, where('room', '==', 'general')), makeSnapshotHandler(),
       (e)=>console.error('chat: error en sala general', e)));
-    chatUnsubs.push(onSnapshot(query(col, where('participants', 'array-contains', currentUser.email)), applySnapshot,
+    chatUnsubs.push(onSnapshot(query(col, where('participants', 'array-contains', currentUser.email)), makeSnapshotHandler(),
       (e)=>console.error('chat: error en mensajes privados', e)));
   }catch(e){
     console.error('No se pudo iniciar el chat interno', e);

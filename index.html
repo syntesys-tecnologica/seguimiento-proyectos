@@ -484,10 +484,81 @@ html[data-theme="dark"] .form-section legend{ color:var(--muted); }
 .progress-editor-total{ display:grid; grid-template-columns:90px 1fr 48px; align-items:center; gap:12px; padding-top:8px; border-top:1px dashed var(--line); }
 .progress-editor-total label{ font-size:13px; font-weight:700; }
 input[type=range]{ accent-color:var(--ink); }
+
+/* ---------- Chat interno (grupal + privado) ---------- */
+.chat-bubble{
+  position:fixed; right:20px; bottom:20px; z-index:45;
+  width:56px; height:56px; border-radius:50%; border:none; cursor:pointer;
+  background:#7A5FC0; color:#fff; font-size:24px;
+  display:flex; align-items:center; justify-content:center;
+  box-shadow:var(--shadow-lg);
+}
+.chat-badge{
+  position:absolute; top:-4px; right:-4px; min-width:20px; height:20px; padding:0 5px;
+  border-radius:999px; background:#B3352A; color:#fff; font-size:11px; font-weight:700;
+  align-items:center; justify-content:center; border:2px solid var(--paper);
+}
+.chat-panel{
+  position:fixed; right:20px; bottom:88px; z-index:45;
+  width:340px; height:480px; max-height:calc(100vh - 120px);
+  background:var(--card); border:1px solid var(--line); border-radius:var(--r-md);
+  box-shadow:var(--shadow-lg); display:flex; flex-direction:column; overflow:hidden;
+}
+@media (max-width:640px){
+  .chat-panel{ right:10px; left:10px; bottom:82px; width:auto; height:calc(100vh - 140px); }
+}
+.chat-panel-header{
+  display:flex; align-items:center; gap:8px; padding:14px 16px; border-bottom:1px solid var(--line); flex:none;
+}
+.chat-panel-title{ font-weight:700; font-size:14px; flex:1; }
+.chat-back, .chat-close{
+  border:none; background:transparent; cursor:pointer; font-size:16px; color:var(--muted);
+  padding:4px 6px; border-radius:6px; flex:none;
+}
+.chat-back:hover, .chat-close:hover{ background:var(--paper); color:var(--ink); }
+.chat-list{ flex:1; overflow-y:auto; padding:6px; }
+.chat-conv-row{
+  display:flex; align-items:center; gap:10px; width:100%; padding:10px; border:none; background:transparent;
+  cursor:pointer; border-radius:var(--r-sm); text-align:left;
+}
+.chat-conv-row:hover{ background:var(--paper); }
+.chat-conv-avatar{
+  flex:none; width:36px; height:36px; border-radius:50%; background:#7A5FC0; color:#fff;
+  display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px;
+}
+.chat-conv-avatar-group{ background:#1B7F8C; }
+.chat-conv-info{ flex:1; min-width:0; }
+.chat-conv-name{ font-weight:700; font-size:13px; }
+.chat-conv-preview{ font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.chat-conv-unread{
+  flex:none; min-width:20px; height:20px; padding:0 5px; border-radius:999px; background:#B3352A; color:#fff;
+  font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;
+}
+.chat-empty{ padding:20px; text-align:center; color:var(--muted); font-size:13px; }
+.chat-thread-messages{ flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:10px; }
+.chat-msg{ max-width:80%; display:flex; flex-direction:column; gap:2px; }
+.chat-msg-mine{ align-self:flex-end; align-items:flex-end; }
+.chat-msg-theirs{ align-self:flex-start; align-items:flex-start; }
+.chat-msg-author{ font-size:11px; font-weight:700; color:var(--muted); }
+.chat-msg-bubble{ padding:8px 12px; border-radius:14px; font-size:13px; line-height:1.4; word-break:break-word; }
+.chat-msg-mine .chat-msg-bubble{ background:#7A5FC0; color:#fff; border-bottom-right-radius:4px; }
+.chat-msg-theirs .chat-msg-bubble{ background:var(--paper); color:var(--ink); border-bottom-left-radius:4px; }
+.chat-msg-time{ font-size:10px; color:var(--muted); }
+.chat-compose{ display:flex; gap:8px; padding:10px; border-top:1px solid var(--line); flex:none; }
+.chat-compose-input{
+  flex:1; padding:9px 12px; border:1px solid var(--line); border-radius:999px; font-size:13px;
+  background:var(--paper); color:var(--ink);
+}
+.chat-send-btn{
+  flex:none; width:36px; height:36px; border-radius:50%; border:none; background:#7A5FC0; color:#fff;
+  cursor:pointer; font-size:15px; display:flex; align-items:center; justify-content:center;
+}
+.chat-send-btn:hover{ background:#6a50ab; }
 </style>
 </head>
 <body>
 <div id="root"></div>
+<div id="chat-widget"></div>
 <script>
 const SEED_PROJECTS = [{"id": 1, "departamento": "QUINDIO", "ciudad": "CALARCÁ", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "CALARCÁ", "coordinador": "PEDRO TURIZO", "estado": "RECAUDADO", "contratista": "MANTPRO", "nCotizacion": "25999-071", "fEnvioCot": "2025-11-19", "fAprobCot": "2025-11-24", "fInicioObra": "2025-10-25", "fPruebas": "2026-11-26", "fEntrega": "2025-12-04", "fFinGarantia": "2026-12-04", "tiempoEjecucion": 40, "tuberia": 1, "cableado": 1, "equipos": 1, "avance": 1, "tipoCiudad": "noviembre", "mes": "diciembre", "fLiquidacion": "2025-12-15", "fRecepcionOC": "2026-12-16", "fFacturacionOC": "2026-01-06", "nFactura": "FE-2220", "fEmisionFactura": "2026-01-19", "fFacturacionRecaudo": "2026-02-18", "observaciones": null}, {"id": 2, "departamento": "CUNDINAMARCA", "ciudad": "BOGOTÁ", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "SAN JOSÉ DE BAVARIA", "coordinador": "JOSÉ LUIS BERRIO", "estado": "RECAUDADO", "contratista": "JE INSTALACIONES", "nCotizacion": 25992, "fEnvioCot": "2026-10-03", "fAprobCot": "2025-09-29", "fInicioObra": "2025-09-29", "fPruebas": "2025-10-30", "fEntrega": "2025-12-15", "fFinGarantia": "2026-12-15", "tiempoEjecucion": 77, "tuberia": 1, "cableado": 1, "equipos": 1, "avance": 1, "tipoCiudad": "junio", "mes": "diciembre", "fLiquidacion": "2026-12-15", "fRecepcionOC": "2026-12-16", "fFacturacionOC": "2026-01-06", "nFactura": "FE-2218", "fEmisionFactura": "2026-01-19", "fFacturacionRecaudo": "2026-02-18", "observaciones": null}, {"id": 3, "departamento": "CUNDINAMARCA", "ciudad": "BOGOTÁ", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "RIONEGRO CALLE 100", "coordinador": "JOSÉ LUIS BERRIO", "estado": "RECAUDADO", "contratista": "ASISTEL", "nCotizacion": "25999-115", "fEnvioCot": "2025-11-19", "fAprobCot": "2025-11-24", "fInicioObra": "2025-12-22", "fPruebas": "2026-01-06", "fEntrega": "2026-01-06", "fFinGarantia": "2027-01-06", "tiempoEjecucion": 15, "tuberia": 1, "cableado": 1, "equipos": 1, "avance": 1, "tipoCiudad": "junio", "mes": "enero", "fLiquidacion": "2026-01-16", "fRecepcionOC": "2026-01-26", "fFacturacionOC": "2026-01-27", "nFactura": "FE-2247", "fEmisionFactura": "2026-02-06", "fFacturacionRecaudo": "2026-02-13", "observaciones": null}, {"id": 4, "departamento": "CUNDINAMARCA", "ciudad": "BOGOTÁ", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "LAS FERIAS CALLE 72", "coordinador": "JOSÉ LUIS BERRIO", "estado": "RECAUDADO", "contratista": "AUSEC", "nCotizacion": "25999-179", "fEnvioCot": "2025-11-24", "fAprobCot": "2026-11-24", "fInicioObra": "2025-12-05", "fPruebas": "2025-12-14", "fEntrega": "2025-12-14", "fFinGarantia": "2026-12-14", "tiempoEjecucion": 9, "tuberia": 1, "cableado": 1, "equipos": 1, "avance": 1, "tipoCiudad": "octubre", "mes": "diciembre", "fLiquidacion": "2025-12-15", "fRecepcionOC": "2025-12-16", "fFacturacionOC": "2026-01-27", "nFactura": "FE-2219", "fEmisionFactura": "2026-01-19", "fFacturacionRecaudo": "2026-02-18", "observaciones": null}, {"id": 5, "departamento": "CUNDINAMARCA", "ciudad": "BOGOTÁ", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "GRANADA HILLS", "coordinador": null, "estado": "RECAUDADO", "contratista": "COMSELEC", "nCotizacion": 260092, "fEnvioCot": "2026-03-09", "fAprobCot": "2026-03-10", "fInicioObra": null, "fPruebas": "2026-01-19", "fEntrega": "2026-01-26", "fFinGarantia": "2027-01-26", "tiempoEjecucion": 46048, "tuberia": 1, "cableado": 1, "equipos": 1, "avance": 1, "tipoCiudad": "Principal", "mes": "enero", "fLiquidacion": "2026-05-15", "fRecepcionOC": "2026-05-29", "fFacturacionOC": "2026-06-02", "nFactura": "FE-2425", "fEmisionFactura": "2026-06-03", "fFacturacionRecaudo": "2026-07-03", "observaciones": null}, {"id": 6, "departamento": "CUNDINAMARCA", "ciudad": "BOGOTÁ", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "SANTA BARBARA AUTOPISTA", "coordinador": "JOSÉ LUIS BERRIO", "estado": "RECAUDADO", "contratista": "JE INSTALACIONES", "nCotizacion": "25999-208", "fEnvioCot": "2025-12-10", "fAprobCot": "2025-12-10", "fInicioObra": "2025-09-29", "fPruebas": null, "fEntrega": "2026-01-20", "fFinGarantia": "2027-01-20", "tiempoEjecucion": 113, "tuberia": 1, "cableado": 1, "equipos": 1, "avance": 1, "tipoCiudad": "Principal", "mes": "enero", "fLiquidacion": "2026-02-13", "fRecepcionOC": "2026-03-03", "fFacturacionOC": "2026-03-03", "nFactura": "FE-2288", "fEmisionFactura": "2026-03-05", "fFacturacionRecaudo": "2026-04-01", "observaciones": null}, {"id": 7, "departamento": "BOYACÁ", "ciudad": "CHIQUINQUIRÁ", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "CHIQUINQUIRÁ", "coordinador": null, "estado": "RECAUDADO", "contratista": "SOLINCORP", "nCotizacion": "25999-226", "fEnvioCot": "2025-12-10", "fAprobCot": "2025-12-10", "fInicioObra": "2025-12-04", "fPruebas": "N/A", "fEntrega": "2026-01-15", "fFinGarantia": "2027-01-15", "tiempoEjecucion": 42, "tuberia": 1, "cableado": 1, "equipos": 1, "avance": 1, "tipoCiudad": "Resto del pais", "mes": "enero", "fLiquidacion": "2026-02-05", "fRecepcionOC": "2026-03-03", "fFacturacionOC": "2026-03-03", "nFactura": "FE-2290", "fEmisionFactura": "2026-03-10", "fFacturacionRecaudo": "2026-04-01", "observaciones": null}, {"id": 8, "departamento": "CUNDINAMARCA", "ciudad": "BOGOTÁ", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "CHAPINERO CALLE 47", "coordinador": "JOSÉ LUIS BERRIO", "estado": "RECAUDADO", "contratista": "SOLINCORP", "nCotizacion": 260340, "fEnvioCot": "2026-03-09", "fAprobCot": "2026-03-10", "fInicioObra": "2026-02-25", "fPruebas": "N/A", "fEntrega": "2026-03-26", "fFinGarantia": "2027-03-26", "tiempoEjecucion": 29, "tuberia": 1, "cableado": 1, "equipos": 1, "avance": 1, "tipoCiudad": "Principal", "mes": "marzo", "fLiquidacion": "2026-05-15", "fRecepcionOC": "2026-05-29", "fFacturacionOC": "2026-06-01", "nFactura": "FE-2423", "fEmisionFactura": "2026-06-02", "fFacturacionRecaudo": "2026-07-03", "observaciones": null}, {"id": 9, "departamento": "ATLÁNTICO", "ciudad": "BARRANQUILLA", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "ALAMEDA", "coordinador": null, "estado": "RECAUDADO", "contratista": "AUSEC", "nCotizacion": 260341, "fEnvioCot": "2026-03-10", "fAprobCot": "2026-03-18", "fInicioObra": "2026-02-23", "fPruebas": "2026-03-13", "fEntrega": "2026-03-20", "fFinGarantia": "2027-03-20", "tiempoEjecucion": 25, "tuberia": 1, "cableado": 1, "equipos": 1, "avance": 1, "tipoCiudad": "Principal", "mes": "marzo", "fLiquidacion": "2026-04-22", "fRecepcionOC": "2026-05-11", "fFacturacionOC": "2026-05-15", "nFactura": "FE-2390", "fEmisionFactura": "2026-05-11", "fFacturacionRecaudo": "2026-07-03", "observaciones": null}, {"id": 10, "departamento": "BOLÍVAR", "ciudad": "CARTAGENA", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "ALCIBIA", "coordinador": "JUAN DIEGO CEBALLOS", "estado": "RECAUDADO", "contratista": "JE INSTALACIONES", "nCotizacion": 260339, "fEnvioCot": "2026-03-05", "fAprobCot": null, "fInicioObra": "2026-02-21", "fPruebas": "2026-03-12", "fEntrega": "2026-03-20", "fFinGarantia": "2027-03-20", "tiempoEjecucion": 27, "tuberia": 1, "cableado": 1, "equipos": 1, "avance": 1, "tipoCiudad": "Secundaria", "mes": "marzo", "fLiquidacion": "2026-05-07", "fRecepcionOC": "2026-05-11", "fFacturacionOC": "2026-05-11", "nFactura": "FE-2391", "fEmisionFactura": "2026-05-11", "fFacturacionRecaudo": "2026-07-03", "observaciones": null}, {"id": 11, "departamento": "QUINDÍO", "ciudad": "ARMENIA", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "ARMENIA CRISTAL", "coordinador": "JUAN DIEGO CEBALLOS", "estado": "RECAUDADO", "contratista": "VIDEODAZA", "nCotizacion": 260326, "fEnvioCot": null, "fAprobCot": null, "fInicioObra": "2026-01-23", "fPruebas": "00:00:00", "fEntrega": "2026-04-08", "fFinGarantia": "2027-04-08", "tiempoEjecucion": 75, "tuberia": 1, "cableado": 1, "equipos": 1, "avance": 1, "tipoCiudad": "Secundaria", "mes": "abril", "fLiquidacion": "2026-05-13", "fRecepcionOC": "2026-06-03", "fFacturacionOC": "2026-06-03", "nFactura": "FE-2426", "fEmisionFactura": "2026-06-03", "fFacturacionRecaudo": "2026-07-03", "observaciones": null}, {"id": 12, "departamento": "ATLÁNTICO", "ciudad": "BARRANQUILLA", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "PLAZA NORTE VILLA CAROLINA", "coordinador": "JUAN DIEGO CEBALLOS", "estado": "RECAUDADO", "contratista": "AUSEC", "nCotizacion": 260569, "fEnvioCot": "2026-04-24", "fAprobCot": "2026-05-05", "fInicioObra": "2026-04-18", "fPruebas": "2026-05-29", "fEntrega": "2026-06-06", "fFinGarantia": "2027-06-06", "tiempoEjecucion": 49, "tuberia": 1, "cableado": 1, "equipos": 0.98, "avance": 0.9933333333333333, "tipoCiudad": "Principal", "mes": "junio", "fLiquidacion": "2026-07-23", "fRecepcionOC": "2026-07-28", "fFacturacionOC": "2026-08-04", "nFactura": "FE-2525", "fEmisionFactura": "2026-08-04", "fFacturacionRecaudo": "2026-08-21", "observaciones": "25-06-2026: \n-La tienda a la fecha está pendiente la instalación de los magneticos en la puerta del malacate, esto debido a que la constructora no ha terminar de realizar la instalación, el sistema se entregó a operaciones y se enlazó con G4S con esta novedad.\n-Posterior a la entrega del sistema el store openner solicitó realizar unas mofidicaciones al la ubicación de las góndolas lo que afectó la visual en la parte central de los pasillos."}, {"id": 13, "departamento": "ATLÁNTICO", "ciudad": "BARRANQUILLA", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "PRADERA", "coordinador": "JUAN DIEGO CEBALLOS", "estado": "RECAUDADO", "contratista": "JE INSTALACIONES", "nCotizacion": 260576, "fEnvioCot": "2026-04-28", "fAprobCot": "2026-05-04", "fInicioObra": "2026-04-20", "fPruebas": "2026-05-20", "fEntrega": "2026-06-04", "fFinGarantia": "2027-06-04", "tiempoEjecucion": 45, "tuberia": 1, "cableado": 1, "equipos": 1, "avance": 1, "tipoCiudad": "Principal", "mes": "junio", "fLiquidacion": "2026-06-30", "fRecepcionOC": "2026-07-14", "fFacturacionOC": "2026-07-14", "nFactura": "FE-2481", "fEmisionFactura": "2026-07-14", "fFacturacionRecaudo": "2026-07-24", "observaciones": "25-06-2026: \n-La tienda se encuentra entregada al area de operaciones y enlazada con la empresa G4S sin ningún pendiente."}, {"id": 14, "departamento": "BOYACÁ", "ciudad": "DUITAMA", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "INNOVO PLAZA", "coordinador": "JOSÉ LUIS BERRIO", "estado": "OC SOLICITADA", "contratista": "SOLINCORP", "nCotizacion": 260679, "fEnvioCot": "2026-06-12", "fAprobCot": "2026-06-17", "fInicioObra": "2026-05-20", "fPruebas": "2026-06-13", "fEntrega": "2026-06-20", "fFinGarantia": "2027-06-20", "tiempoEjecucion": 31, "tuberia": 1, "cableado": 1, "equipos": 1, "avance": 1, "tipoCiudad": "Resto del pais", "mes": "junio", "fLiquidacion": "2026-08-21", "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": "3-8-2026\n\nProyecto liquidado"}, {"id": 15, "departamento": "SANTANDER", "ciudad": "BARRANCABERMEJA", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "BARRIO COLOMBIA", "coordinador": "FELIPE FLOREZ", "estado": "OC SOLICITADA", "contratista": "SOLINCORP", "nCotizacion": 260697, "fEnvioCot": "2026-06-11", "fAprobCot": "2026-06-17", "fInicioObra": "2026-05-22", "fPruebas": "2026-06-13", "fEntrega": "2026-06-20", "fFinGarantia": "2027-06-20", "tiempoEjecucion": 29, "tuberia": 1, "cableado": 1, "equipos": 1, "avance": 1, "tipoCiudad": "Resto del pais", "mes": "junio", "fLiquidacion": "2026-08-06", "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": "25-06-2026:\n-El 20-06-2026 se culminó con la instalación de todo el sistema en la tienda, se realizó enlace con la empresa G4S pero no se logró entregar el sistema a Dollarcity debido a que operaciones no asistió.\n-La Store Openner informa que la entrega a operaciones se realizará el 02 de julio."}, {"id": 16, "departamento": "NARIÑO", "ciudad": "PASTO", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "PARANÁ ANDINO", "coordinador": "JOSÉ LUIS BERRIO", "estado": "FACTURADA", "contratista": "MANTPRO", "nCotizacion": 260591, "fEnvioCot": "2026-05-07", "fAprobCot": "2026-05-07", "fInicioObra": "2026-05-11", "fPruebas": "2026-06-12", "fEntrega": "2026-06-20", "fFinGarantia": "2027-06-20", "tiempoEjecucion": 40, "tuberia": 1, "cableado": 1, "equipos": 1, "avance": 1, "tipoCiudad": "Secundaria", "mes": "junio", "fLiquidacion": "2026-08-31", "fRecepcionOC": "2026-08-25", "fFacturacionOC": "2026-08-25", "nFactura": "FE-2579", "fEmisionFactura": "2026-08-25", "fFacturacionRecaudo": null, "observaciones": "3-8-2026\n\nProyecto liquidado"}, {"id": 17, "departamento": "CÓRDOBA", "ciudad": "MONTELIBANO", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "MONTELIBANO", "coordinador": "JUAN DIEGO CEBALLOS", "estado": "OC SOLICITADA", "contratista": "AUSEC", "nCotizacion": 260624, "fEnvioCot": "2026-05-19", "fAprobCot": "2026-05-27", "fInicioObra": "2026-05-19", "fPruebas": "2026-06-04", "fEntrega": "2026-06-13", "fFinGarantia": "2027-06-13", "tiempoEjecucion": 25, "tuberia": 1, "cableado": 1, "equipos": 0.99, "avance": 0.9966666666666667, "tipoCiudad": "Resto del pais", "mes": "junio", "fLiquidacion": "2026-08-13", "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": "25-06-2026:\n-La tienda se encuentra pendiente la instalación de la nueva UPS, en el lugar se instaló UPS provisional, el sistema se encuentra enlazado con G4S y entregado al area de operaciones."}, {"id": 18, "departamento": "CESAR", "ciudad": "VALLEDUPAR", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "AVENIDA SIERRA NEVADA", "coordinador": "JUAN DIEGO CEBALLOS", "estado": "RECAUDADO", "contratista": "JE INSTALACIONES", "nCotizacion": 260592, "fEnvioCot": "2026-05-07", "fAprobCot": "2026-05-07", "fInicioObra": "2026-05-02", "fPruebas": "2026-06-01", "fEntrega": "2026-06-09", "fFinGarantia": "2027-06-09", "tiempoEjecucion": 38, "tuberia": 1, "cableado": 1, "equipos": 1, "avance": 1, "tipoCiudad": "Resto del pais", "mes": "junio", "fLiquidacion": "2026-07-06", "fRecepcionOC": "2026-07-16", "fFacturacionOC": "2026-07-16", "nFactura": "FE-2494", "fEmisionFactura": "2026-07-17", "fFacturacionRecaudo": "2026-07-31", "observaciones": "25-06-2026:\n-La tienda se encuentra entregada al area de operaciones y enlazada con G4S."}, {"id": 19, "departamento": "CUNDINAMARCA", "ciudad": "BOGOTÁ", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "CAMPANELLA", "coordinador": "CARLOS ESPITIA", "estado": "OC SOLICITADA", "contratista": "INNPRO", "nCotizacion": 260710, "fEnvioCot": "2026-06-18", "fAprobCot": "2026-06-18", "fInicioObra": "2026-05-10", "fPruebas": "2026-06-10", "fEntrega": "2026-06-20", "fFinGarantia": "2027-06-20", "tiempoEjecucion": 41, "tuberia": 1, "cableado": 1, "equipos": 1, "avance": 1, "tipoCiudad": "Principal", "mes": "junio", "fLiquidacion": "2026-08-28", "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": "25-06-2026: \n-La tienda se culminó la instalación y se enlazó con la empresa G4S pero no se ha logrado entregar a operaciones ya que ese día no asistió nadie.\n-El store openner informa que la entrega queda reprogramada para el 02-07-2026\n\n02-07-2026: \nSe realiza entrega al store openner dejando como observación que se debe instalar cámara nueva en pasillo 4 debido a que lo asignaron para los productos de cuidado personal, se le envió correo al administrador de seguridad Mauricio Contreras y se coordinará la instalación en horario nocturno."}, {"id": 20, "departamento": "LA GUAJIRA", "ciudad": "SAN JUAN DEL CESAR", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "SAN JUAN", "coordinador": "JUAN DIEGO CEBALLOS", "estado": "RECAUDADO", "contratista": "JE INSTALACIONES", "nCotizacion": 260625, "fEnvioCot": "2026-05-19", "fAprobCot": null, "fInicioObra": "2026-05-14", "fPruebas": "2026-06-14", "fEntrega": "2026-06-20", "fFinGarantia": "2027-06-20", "tiempoEjecucion": 37, "tuberia": 1, "cableado": 1, "equipos": 1, "avance": 1, "tipoCiudad": "Resto del pais", "mes": "junio", "fLiquidacion": "2026-07-27", "fRecepcionOC": "2026-08-03", "fFacturacionOC": "2026-08-03", "nFactura": "FE-2526", "fEmisionFactura": "2026-08-04", "fFacturacionRecaudo": "2026-08-21", "observaciones": "25-06-2026:\n-La tienda se enlazó con la empresa G4S el 25-06-2026 e igualmente se esta realizando la entrega al store openner para finalizar en su totalidad."}, {"id": 21, "departamento": "NARIÑO", "ciudad": "IPIALES", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "ZAFIRO", "coordinador": "JOSÉ LUIS BERRIO", "estado": "OC SOLICITADA", "contratista": "MANTPRO", "nCotizacion": 260663, "fEnvioCot": "2026-05-26", "fAprobCot": "2026-05-26", "fInicioObra": "2026-05-15", "fPruebas": "2026-06-11", "fEntrega": "2026-06-20", "fFinGarantia": "2027-06-20", "tiempoEjecucion": 36, "tuberia": 1, "cableado": 1, "equipos": 1, "avance": 1, "tipoCiudad": "Resto del pais", "mes": "junio", "fLiquidacion": "2026-08-06", "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": "3-8-2026\n\nProyecto liquidado"}, {"id": 22, "departamento": "VALLE DEL CAUCA", "ciudad": "PALMIRA", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "VERSALLES", "coordinador": "JOSÉ LUIS BERRIO", "estado": "RECAUDADO", "contratista": "MANTPRO", "nCotizacion": 260662, "fEnvioCot": "2026-05-26", "fAprobCot": "2026-05-26", "fInicioObra": "2026-05-16", "fPruebas": "2026-06-09", "fEntrega": "2026-06-20", "fFinGarantia": "2027-06-20", "tiempoEjecucion": 35, "tuberia": 1, "cableado": 1, "equipos": 1, "avance": 1, "tipoCiudad": "Secundaria", "mes": "junio", "fLiquidacion": "2026-07-23", "fRecepcionOC": "2026-07-28", "fFacturacionOC": "2026-08-03", "nFactura": "FE-2524", "fEmisionFactura": "2026-08-04", "fFacturacionRecaudo": "2026-08-21", "observaciones": "3-8-2026\n\nProyecto liquidado"}, {"id": 23, "departamento": "ATLÁNTICO", "ciudad": "BARANOA", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "BARANOA", "coordinador": "FELIPE FLOREZ", "estado": "OC SOLICITADA", "contratista": "GLOBALTEC", "nCotizacion": 260696, "fEnvioCot": "2026-06-10", "fAprobCot": "2026-06-10", "fInicioObra": "2026-05-25", "fPruebas": "2026-06-15", "fEntrega": "2026-07-01", "fFinGarantia": "2027-07-01", "tiempoEjecucion": 37, "tuberia": 0.98, "cableado": 0.98, "equipos": 0.98, "avance": 0.98, "tipoCiudad": "Secundaria", "mes": "julio", "fLiquidacion": "2026-08-12", "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": "25-06-2026: \n-El 20-06-2026 se culminó con la instalación de todo el sistema en la tienda, se realizó enlace con la empresa G4S pero no se logró entregar el sistema a Dollarcity debido a que operaciones no asistió.\n-El Store Openner informa que se debe programar la entrega a operaciones para el 02-07-2026\n01-07-2026:\nEl 30-06-2026 se realizó entrega a la empresa G4S del sistema de intrusión con los pendientes del sensor watch out y magnetico condensadoras, se validará con el administrador de seguridad para la firma del acta de entrega.\n02-07-2026: \nSe realizó entrega del sistema a la gerencial de la tienda, donde se dejó como observación pendiente la instalación del watchou y magnetico condensadoras."}, {"id": 24, "departamento": "CUNDINAMARCA", "ciudad": "BOGOTÁ", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "BOSA LA LIBERTAD", "coordinador": "CARLOS ESPITIA", "estado": "OC SOLICITADA", "contratista": "INNPRO", "nCotizacion": 260711, "fEnvioCot": "2026-06-18", "fAprobCot": "2026-06-18", "fInicioObra": "2026-06-03", "fPruebas": "2026-07-07", "fEntrega": "2026-07-22", "fFinGarantia": "2027-07-22", "tiempoEjecucion": 49, "tuberia": 1, "cableado": 1, "equipos": 1, "avance": 1, "tipoCiudad": "Principal", "mes": "julio", "fLiquidacion": "2026-08-24", "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": "15-07-2026: \n-La tienda se entrega a la empresa G4S el 21/07/2026. \n-El store openner informa que la entrega queda programada para el 22-07-2026"}, {"id": 25, "departamento": "NORTE DE SANTANDER", "ciudad": "PAMPLONA", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "PAMPLONA", "coordinador": "CARLOS ESPITIA", "estado": "EN PROCESO", "contratista": "GLOBALTEC", "nCotizacion": 261067, "fEnvioCot": null, "fAprobCot": null, "fInicioObra": "2026-08-08", "fPruebas": "2026-09-08", "fEntrega": "2026-09-18", "fFinGarantia": "2027-09-18", "tiempoEjecucion": 41, "tuberia": 0.39, "cableado": 0, "equipos": 0, "avance": 0.13, "tipoCiudad": "Resto del pais", "mes": "septiembre", "fLiquidacion": null, "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": null}, {"id": 26, "departamento": "QUINDÍO", "ciudad": "ARMENIA", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "AVENIDA BOLIVAR", "coordinador": "JUAN DIEGO CEBALLOS", "estado": "EN PROCESO", "contratista": "MANTPRO", "nCotizacion": 261059, "fEnvioCot": "2026-08-05", "fAprobCot": "2026-08-14", "fInicioObra": "2026-07-29", "fPruebas": "2026-08-28", "fEntrega": "2026-09-04", "fFinGarantia": "2027-09-04", "tiempoEjecucion": 38, "tuberia": 1, "cableado": 1, "equipos": 0.7, "avance": 0.9, "tipoCiudad": "Secundaria", "mes": "septiembre", "fLiquidacion": null, "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": "Pendiente la instalación y conexión de los equipos de gerencia, el lunes 31 de agosro se inician labores en esta área dado que obra apenas nos entregó. Se posponen las pruebas por parte de arquitectura debido a que no hay conexión desde el punto cero para la conexión eléxctrica de la tienda, se desconoce fecha de pruebas."}, {"id": 27, "departamento": "META", "ciudad": "VILLAVICENCIO", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "LA GRAMA", "coordinador": "JOSÉ LUIS BERRIO", "estado": "EN PROCESO", "contratista": "SOLINCORP", "nCotizacion": 261065, "fEnvioCot": "2026-08-12", "fAprobCot": "2026-08-14", "fInicioObra": "2026-08-05", "fPruebas": "2026-09-11", "fEntrega": "2026-09-18", "fFinGarantia": "2027-09-18", "tiempoEjecucion": 44, "tuberia": 0.98, "cableado": 0.95, "equipos": 0.11, "avance": 0.68, "tipoCiudad": "Resto del pais", "mes": "septiembre", "fLiquidacion": null, "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": null}, {"id": 28, "departamento": "SANTANDER", "ciudad": "FLORIDABLANCA", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "CALLE DE LAS OBLEAS", "coordinador": "CARLOS ESPITIA", "estado": "EN PROCESO", "contratista": "GLOBALTEC", "nCotizacion": 261159, "fEnvioCot": "2026-08-31", "fAprobCot": null, "fInicioObra": "2026-08-06", "fPruebas": "2026-09-09", "fEntrega": "2026-09-20", "fFinGarantia": "2027-09-20", "tiempoEjecucion": 45, "tuberia": 0.59, "cableado": 0, "equipos": 0, "avance": 0.19666666666666666, "tipoCiudad": "Secundaria", "mes": "septiembre", "fLiquidacion": null, "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": null}, {"id": 29, "departamento": "RISARALDA", "ciudad": "DOSQUEBRADAS", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "LA MACARENA DOSQUEBRADAS", "coordinador": "JUAN DIEGO CEBALLOS", "estado": "EN PROCESO", "contratista": "VIDEODAZA", "nCotizacion": 261119, "fEnvioCot": "2026-08-20", "fAprobCot": "2026-08-24", "fInicioObra": "2026-08-24", "fPruebas": "2026-09-29", "fEntrega": "2026-10-06", "fFinGarantia": "2027-10-06", "tiempoEjecucion": 43, "tuberia": 0.15, "cableado": 0, "equipos": 0, "avance": 0.049999999999999996, "tipoCiudad": "Secundaria", "mes": "octubre", "fLiquidacion": null, "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": "En el momento se ha avanzado con las llegadas de loc ductos a gerencia y la instalación de las guayas en bodega y tienda"}, {"id": 30, "departamento": "ATLÁNTICO", "ciudad": "BARRANQUILLA", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "PANORAMA", "coordinador": "JUAN DIEGO CEBALLOS", "estado": "EN PROCESO", "contratista": "JE INSTALACIONES", "nCotizacion": 261142, "fEnvioCot": "2026-08-24", "fAprobCot": "2026-08-24", "fInicioObra": "2026-08-15", "fPruebas": "2026-09-04", "fEntrega": "2026-09-11", "fFinGarantia": "2027-09-11", "tiempoEjecucion": 27, "tuberia": 1, "cableado": 1, "equipos": 0.7, "avance": 0.9, "tipoCiudad": "Principal", "mes": "septiembre", "fLiquidacion": null, "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": "Pendiente labores en gerencia, a obra le falta estructurar la gerencia para poder iniciar con la instalación del rack y sus conexiones. Además hace falta la instalación de las placas del cielo raso de las bodegas y algunos sectores en tienda"}, {"id": 31, "departamento": "BOLÍVAR", "ciudad": "CARTAGENA", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "FREDONIA", "coordinador": "JUAN DIEGO CEBALLOS", "estado": "EN PROCESO", "contratista": "JE INSTALACIONES", "nCotizacion": null, "fEnvioCot": null, "fAprobCot": null, "fInicioObra": "2026-08-31", "fPruebas": "2026-09-23", "fEntrega": "2026-09-30", "fFinGarantia": "2027-09-30", "tiempoEjecucion": 30, "tuberia": 0.05, "cableado": 0, "equipos": 0, "avance": 0.016666666666666666, "tipoCiudad": "Secundaria", "mes": "septiembre", "fLiquidacion": null, "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": null}, {"id": 32, "departamento": "NORTE DE SANTANDER", "ciudad": "CÚCUTA", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "MALL PINAR DEL RIO", "coordinador": "CARLOS ESPITIA", "estado": "POR INICIAR", "contratista": null, "nCotizacion": null, "fEnvioCot": null, "fAprobCot": null, "fInicioObra": "2026-10-06", "fPruebas": "2026-11-12", "fEntrega": "2026-11-20", "fFinGarantia": "2027-11-20", "tiempoEjecucion": 45, "tuberia": 0, "cableado": 0, "equipos": 0, "avance": 0, "tipoCiudad": "Resto del pais", "mes": "noviembre", "fLiquidacion": null, "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": null}, {"id": 33, "departamento": "CUNDINAMARCA", "ciudad": "BOGOTÁ", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "SANTA LIBRADA", "coordinador": "JOSÉ LUIS BERRIO", "estado": "POR INICIAR", "contratista": null, "nCotizacion": null, "fEnvioCot": null, "fAprobCot": null, "fInicioObra": null, "fPruebas": null, "fEntrega": null, "fFinGarantia": "1900-12-31", "tiempoEjecucion": 0, "tuberia": 0, "cableado": 0, "equipos": 0, "avance": 0, "tipoCiudad": "Principal", "mes": "enero", "fLiquidacion": null, "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": null}, {"id": 34, "departamento": "CUNDINAMARCA", "ciudad": "BOGOTÁ", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "FERROCARRIL", "coordinador": null, "estado": "POR INICIAR", "contratista": null, "nCotizacion": null, "fEnvioCot": null, "fAprobCot": null, "fInicioObra": null, "fPruebas": null, "fEntrega": null, "fFinGarantia": "1900-12-31", "tiempoEjecucion": 0, "tuberia": 0, "cableado": 0, "equipos": 0, "avance": 0, "tipoCiudad": "Principal", "mes": "enero", "fLiquidacion": null, "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": null}, {"id": 35, "departamento": "VALLE DEL CAUCA", "ciudad": "ROLDANILLO", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "ROLDANILLO", "coordinador": "JOSÉ LUIS BERRIO", "estado": "POR INICIAR", "contratista": null, "nCotizacion": null, "fEnvioCot": null, "fAprobCot": null, "fInicioObra": null, "fPruebas": null, "fEntrega": null, "fFinGarantia": "1900-12-31", "tiempoEjecucion": 0, "tuberia": 0, "cableado": 0, "equipos": 0, "avance": 0, "tipoCiudad": "Resto del pais", "mes": "enero", "fLiquidacion": null, "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": null}, {"id": 36, "departamento": "CAQUETÁ", "ciudad": "FLORENCIA", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "AV FUNDADORES", "coordinador": "CARLOS ESPITIA", "estado": "POR INICIAR", "contratista": null, "nCotizacion": null, "fEnvioCot": null, "fAprobCot": null, "fInicioObra": "2026-09-12", "fPruebas": "2026-10-17", "fEntrega": null, "fFinGarantia": "1900-12-31", "tiempoEjecucion": -46277, "tuberia": 0, "cableado": 0, "equipos": 0, "avance": 0, "tipoCiudad": "Resto del pais", "mes": "enero", "fLiquidacion": null, "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": null}, {"id": 37, "departamento": "SANTANDER", "ciudad": "BUCARAMANGA", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "MALL PORTAL NORTE", "coordinador": null, "estado": "POR INICIAR", "contratista": null, "nCotizacion": null, "fEnvioCot": null, "fAprobCot": null, "fInicioObra": null, "fPruebas": null, "fEntrega": null, "fFinGarantia": "1900-12-31", "tiempoEjecucion": 0, "tuberia": 0, "cableado": 0, "equipos": 0, "avance": 0, "tipoCiudad": "Secundaria", "mes": "enero", "fLiquidacion": null, "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": null}, {"id": 38, "departamento": "CUNDINAMARCA", "ciudad": "SOACHA", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "SOACHA CALLE 13", "coordinador": null, "estado": "POR INICIAR", "contratista": null, "nCotizacion": null, "fEnvioCot": null, "fAprobCot": null, "fInicioObra": null, "fPruebas": null, "fEntrega": null, "fFinGarantia": "1900-12-31", "tiempoEjecucion": 0, "tuberia": 0, "cableado": 0, "equipos": 0, "avance": 0, "tipoCiudad": "Principal", "mes": "enero", "fLiquidacion": null, "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": null}, {"id": 39, "departamento": "VALLE DEL CAUCA", "ciudad": "CALI", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "PANCE CARRERA 122", "coordinador": null, "estado": "POR INICIAR", "contratista": null, "nCotizacion": null, "fEnvioCot": null, "fAprobCot": null, "fInicioObra": null, "fPruebas": null, "fEntrega": null, "fFinGarantia": "1900-12-31", "tiempoEjecucion": 0, "tuberia": 0, "cableado": 0, "equipos": 0, "avance": 0, "tipoCiudad": "Principal", "mes": "enero", "fLiquidacion": null, "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": null}, {"id": 40, "departamento": "CUNDINAMARCA", "ciudad": "BOGOTÁ", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "MALL CEDRITOS 151", "coordinador": null, "estado": "POR INICIAR", "contratista": null, "nCotizacion": null, "fEnvioCot": null, "fAprobCot": null, "fInicioObra": null, "fPruebas": null, "fEntrega": null, "fFinGarantia": "1900-12-31", "tiempoEjecucion": 0, "tuberia": 0, "cableado": 0, "equipos": 0, "avance": 0, "tipoCiudad": "Principal", "mes": "enero", "fLiquidacion": null, "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": null}, {"id": 41, "departamento": "CASANARE", "ciudad": "YOPAL", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "PARQUES FLORA", "coordinador": null, "estado": "POR INICIAR", "contratista": null, "nCotizacion": null, "fEnvioCot": null, "fAprobCot": null, "fInicioObra": null, "fPruebas": null, "fEntrega": null, "fFinGarantia": "1900-12-31", "tiempoEjecucion": 0, "tuberia": 0, "cableado": 0, "equipos": 0, "avance": 0, "tipoCiudad": "Resto del pais", "mes": "enero", "fLiquidacion": null, "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": null}, {"id": 42, "departamento": "CUNDINAMARCA", "ciudad": "VILLETA", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "VILLETA", "coordinador": null, "estado": "POR INICIAR", "contratista": null, "nCotizacion": null, "fEnvioCot": null, "fAprobCot": null, "fInicioObra": null, "fPruebas": null, "fEntrega": null, "fFinGarantia": "1900-12-31", "tiempoEjecucion": 0, "tuberia": 0, "cableado": 0, "equipos": 0, "avance": 0, "tipoCiudad": "Secundaria", "mes": "enero", "fLiquidacion": null, "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": null}, {"id": 43, "departamento": "VALLE DEL CAUCA", "ciudad": "BUGA", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "BUGA CENTRO", "coordinador": null, "estado": "POR INICIAR", "contratista": null, "nCotizacion": null, "fEnvioCot": null, "fAprobCot": null, "fInicioObra": null, "fPruebas": null, "fEntrega": null, "fFinGarantia": "1900-12-31", "tiempoEjecucion": 0, "tuberia": 0, "cableado": 0, "equipos": 0, "avance": 0, "tipoCiudad": "Resto del pais", "mes": "enero", "fLiquidacion": null, "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": null}, {"id": 44, "departamento": "CUNDINAMARCA", "ciudad": "BOGOTÁ", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "MALL CALLE 131", "coordinador": null, "estado": "POR INICIAR", "contratista": null, "nCotizacion": null, "fEnvioCot": null, "fAprobCot": null, "fInicioObra": null, "fPruebas": null, "fEntrega": null, "fFinGarantia": "1900-12-31", "tiempoEjecucion": 0, "tuberia": 0, "cableado": 0, "equipos": 0, "avance": 0, "tipoCiudad": "Principal", "mes": "enero", "fLiquidacion": null, "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": null}, {"id": 45, "departamento": "CUNDINAMARCA", "ciudad": "BOGOTÁ", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "SUBA RINCON CARRERA 93", "coordinador": null, "estado": "POR INICIAR", "contratista": null, "nCotizacion": null, "fEnvioCot": null, "fAprobCot": null, "fInicioObra": null, "fPruebas": null, "fEntrega": null, "fFinGarantia": "1900-12-31", "tiempoEjecucion": 0, "tuberia": 0, "cableado": 0, "equipos": 0, "avance": 0, "tipoCiudad": "Principal", "mes": "enero", "fLiquidacion": null, "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": null}, {"id": 46, "departamento": "CUNDINAMARCA", "ciudad": "BOGOTÁ", "tipoProyecto": "TIENDA NUEVA", "cliente": "DOLLARCITY", "sede": "CODABAS", "coordinador": null, "estado": "POR INICIAR", "contratista": null, "nCotizacion": null, "fEnvioCot": null, "fAprobCot": null, "fInicioObra": null, "fPruebas": null, "fEntrega": null, "fFinGarantia": "1900-12-31", "tiempoEjecucion": 0, "tuberia": 0, "cableado": 0, "equipos": 0, "avance": 0, "tipoCiudad": "Principal", "mes": "enero", "fLiquidacion": null, "fRecepcionOC": null, "fFacturacionOC": null, "nFactura": null, "fEmisionFactura": null, "fFacturacionRecaudo": null, "observaciones": null}];
 </script>
@@ -931,6 +1002,17 @@ function topProjectsByDateDelay(fromKey, toKey, limit = 8){
 /* ---------- Almacenamiento persistente (Firebase Firestore) ---------- */
 // IMPORTANTE: rellena estos datos con los de TU proyecto de Firebase antes
 // de publicar el archivo. Instrucciones completas al final de este mensaje.
+//
+// IMPORTANTE (chat interno): el chat usa una colección NUEVA llamada
+// "chat_messages" (independiente de "app_data", que es donde vive todo lo
+// demás). Las reglas de seguridad de Firestore deben permitir leer/escribir
+// ahí también, o los mensajes no van a guardarse. Ejemplo mínimo a agregar
+// dentro de "service cloud.firestore { match /databases/{database}/documents { ... } }":
+//
+//   match /chat_messages/{messageId} {
+//     allow read, write: if request.auth != null;
+//   }
+//
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyBEDLTr1JN6EefW0VJ7GGY2uCEK2J6jq3E",
   authDomain: "seguimientos-proyectos-dc.firebaseapp.com",
@@ -949,7 +1031,7 @@ function getFirebase(){
   if (!_fbReady){
     _fbReady = (async () => {
       const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js');
-      const { getFirestore, doc, getDoc, setDoc, deleteDoc } =
+      const { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, addDoc, query, where, onSnapshot, limit } =
         await import('https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js');
       const { getAuth, signInAnonymously, onAuthStateChanged } =
         await import('https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js');
@@ -960,7 +1042,7 @@ function getFirebase(){
         const unsub = onAuthStateChanged(auth, (user) => { if (user){ unsub(); resolve(); } });
         signInAnonymously(auth).catch(reject);
       });
-      return { db, doc, getDoc, setDoc, deleteDoc };
+      return { db, doc, getDoc, setDoc, deleteDoc, collection, addDoc, query, where, onSnapshot, limit };
     })();
   }
   return _fbReady;
@@ -1189,6 +1271,7 @@ function logChange(entry){
 /* ---------- Render raíz ---------- */
 function render(){
   if (!currentUser){
+    stopChatWidget();
     root.innerHTML = renderAuth();
   } else {
     root.innerHTML = renderApp();
@@ -2485,6 +2568,7 @@ function buildCharts(){
 
 /* ---------- Ciclo tras render ---------- */
 function afterAppRender(){
+  startChatWidget();
   if (activeTab === 'resumen' || activeTab === 'analisis'){
     requestAnimationFrame(buildCharts);
   }
@@ -2497,6 +2581,277 @@ function afterAppRender(){
     try{ mapInstance.remove(); }catch(e){}
     mapInstance = null;
   }
+}
+
+/* ================= CHAT INTERNO (grupal + privado, en vivo) ================= */
+// Vive en su propio contenedor (#chat-widget), FUERA de #root, para que los
+// re-render completos del resto de la app (cada vez que se cambia de
+// pestaña, se edita un proyecto, etc.) nunca lo toquen — así nunca se pierde
+// un mensaje a medio escribir ni hace falta recargar para ver uno nuevo.
+const chatWidgetEl = document.getElementById('chat-widget');
+
+let chatStarted = false;
+let chatOpen = false;
+let chatView = 'list';       // 'list' | 'thread'
+let chatActiveRoom = null;   // 'general' | 'dm__correoA__correoB' (orden alfabético)
+let chatActivePeer = null;   // { email, name } de la conversación privada abierta
+let chatMessagesByRoom = {}; // { roomId: [ {id, room, participants, fromEmail, fromName, text, ts} ] }
+let chatUnsubs = [];
+
+function chatDmRoomId(emailA, emailB){
+  return 'dm__' + [emailA, emailB].sort().join('__');
+}
+function chatUnreadCount(roomId){
+  if (!currentUser) return 0;
+  const msgs = chatMessagesByRoom[roomId] || [];
+  const lastRead = Number(localStorage.getItem(`chat_lastread_${currentUser.email}_${roomId}`)) || 0;
+  return msgs.filter(m => m.ts > lastRead && m.fromEmail !== currentUser.email).length;
+}
+function chatMarkRoomRead(roomId){
+  if (!currentUser) return;
+  localStorage.setItem(`chat_lastread_${currentUser.email}_${roomId}`, String(Date.now()));
+}
+function chatTotalUnread(){
+  return Object.keys(chatMessagesByRoom).reduce((sum, r) => sum + chatUnreadCount(r), 0);
+}
+function chatFmtTime(ts){
+  const d = new Date(ts);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  return sameDay
+    ? d.toLocaleTimeString('es-CO', { hour:'2-digit', minute:'2-digit' })
+    : `${d.toLocaleDateString('es-CO', { day:'2-digit', month:'2-digit' })} ${d.toLocaleTimeString('es-CO', { hour:'2-digit', minute:'2-digit' })}`;
+}
+
+async function startChatWidget(){
+  if (chatStarted || !currentUser) return;
+  chatStarted = true;
+  renderChatWidget();
+  try{
+    const { db, collection, query, where, onSnapshot } = await getFirebase();
+    const col = collection(db, 'chat_messages');
+
+    const applySnapshot = (snap) => {
+      snap.docChanges().forEach(change => {
+        const data = change.doc.data();
+        const msg = {
+          id: change.doc.id,
+          room: data.room,
+          participants: data.participants || [],
+          fromEmail: data.fromEmail,
+          fromName: data.fromName,
+          text: data.text,
+          ts: data.ts || 0,
+        };
+        if (!chatMessagesByRoom[msg.room]) chatMessagesByRoom[msg.room] = [];
+        const list = chatMessagesByRoom[msg.room];
+        const idx = list.findIndex(m => m.id === msg.id);
+        if (change.type === 'removed'){
+          if (idx !== -1) list.splice(idx, 1);
+        } else if (idx !== -1){
+          list[idx] = msg;
+        } else {
+          list.push(msg);
+        }
+        list.sort((a,b) => a.ts - b.ts);
+      });
+      chatOnMessagesChanged();
+    };
+
+    // Dos escuchas en vivo en vez de una sola: así se evita tener que
+    // combinar filtros distintos (sala general vs. participantes de un
+    // privado) en una sola consulta, lo que en Firestore exigiría crear un
+    // índice compuesto manualmente en la consola — con dos escuchas simples
+    // no hace falta ninguna configuración adicional aparte de las reglas de
+    // seguridad.
+    chatUnsubs.push(onSnapshot(query(col, where('room', '==', 'general')), applySnapshot,
+      (e)=>console.error('chat: error en sala general', e)));
+    chatUnsubs.push(onSnapshot(query(col, where('participants', 'array-contains', currentUser.email)), applySnapshot,
+      (e)=>console.error('chat: error en mensajes privados', e)));
+  }catch(e){
+    console.error('No se pudo iniciar el chat interno', e);
+  }
+}
+
+function stopChatWidget(){
+  chatUnsubs.forEach(unsub => { try{ unsub(); }catch(e){} });
+  chatUnsubs = [];
+  chatMessagesByRoom = {};
+  chatStarted = false;
+  chatOpen = false;
+  chatView = 'list';
+  chatActiveRoom = null;
+  chatActivePeer = null;
+  // Nota: se deja "wired" tal cual (no se borra) — los listeners de
+  // wireChatEvents() están puestos sobre chatWidgetEl, que es un nodo fijo
+  // que nunca se destruye; si se re-agregaran en el próximo login, quedarían
+  // duplicados (cada clic o envío se dispararía dos veces).
+  if (chatWidgetEl){ chatWidgetEl.innerHTML = ''; }
+}
+
+function chatOnMessagesChanged(){
+  updateChatBadge();
+  if (!chatOpen) return;
+  if (chatView === 'thread' && chatActiveRoom) renderChatThreadMessages();
+  else if (chatView === 'list') renderChatList();
+}
+
+async function sendChatMessage(text){
+  const trimmed = (text || '').trim();
+  if (!trimmed || !currentUser || !chatActiveRoom) return;
+  try{
+    const { db, collection, addDoc } = await getFirebase();
+    await addDoc(collection(db, 'chat_messages'), {
+      room: chatActiveRoom,
+      participants: chatActiveRoom === 'general' ? [] : chatActiveRoom.replace(/^dm__/, '').split('__'),
+      fromEmail: currentUser.email,
+      fromName: currentUser.name,
+      text: trimmed,
+      ts: Date.now(),
+    });
+  }catch(e){
+    console.error('No se pudo enviar el mensaje', e);
+  }
+}
+
+/* ---- Render: DOM aislado de #root, se actualiza a mano (sin pasar por
+   render()) para no arriesgarse a borrar lo que alguien esté escribiendo. ---- */
+function updateChatBadge(){
+  const badge = chatWidgetEl && chatWidgetEl.querySelector('#chat-badge');
+  if (!badge) return;
+  const n = chatTotalUnread();
+  badge.textContent = n > 9 ? '9+' : String(n);
+  badge.style.display = n > 0 ? 'flex' : 'none';
+}
+
+function renderChatWidget(){
+  if (!chatWidgetEl || !currentUser) return;
+  const n = chatTotalUnread();
+  chatWidgetEl.innerHTML = `
+    <button id="chat-bubble-btn" class="chat-bubble" title="Chat interno" aria-label="Chat interno">
+      💬<span id="chat-badge" class="chat-badge" style="display:${n>0?'flex':'none'}">${n>9?'9+':n}</span>
+    </button>
+    ${chatOpen ? renderChatPanel() : ''}
+  `;
+  if (chatOpen){
+    if (chatView === 'thread' && chatActiveRoom) renderChatThreadMessages();
+    else renderChatList();
+  }
+  wireChatEvents();
+}
+
+function renderChatPanel(){
+  const title = chatView === 'thread'
+    ? esc(chatActiveRoom === 'general' ? 'Chat general' : (chatActivePeer ? chatActivePeer.name : ''))
+    : 'Chat interno';
+  return `
+    <div class="chat-panel">
+      <div class="chat-panel-header">
+        ${chatView === 'thread' ? `<button type="button" class="chat-back" data-chat-action="back" aria-label="Volver">←</button>` : ''}
+        <div class="chat-panel-title">${title}</div>
+        <button type="button" class="chat-close" data-chat-action="close" aria-label="Cerrar chat">✕</button>
+      </div>
+      ${chatView === 'thread'
+        ? `<div id="chat-thread-messages" class="chat-thread-messages"></div>
+           <form id="chat-compose-form" class="chat-compose">
+             <input id="chat-compose-input" class="chat-compose-input" type="text" placeholder="Escribe un mensaje…" autocomplete="off" />
+             <button type="submit" class="chat-send-btn" aria-label="Enviar">➤</button>
+           </form>`
+        : `<div id="chat-list" class="chat-list"></div>`}
+    </div>
+  `;
+}
+
+function renderChatList(){
+  const listEl = chatWidgetEl.querySelector('#chat-list');
+  if (!listEl) return;
+  const generalUnread = chatUnreadCount('general');
+  const generalMsgs = chatMessagesByRoom['general'] || [];
+  const lastGeneral = generalMsgs[generalMsgs.length - 1];
+
+  const rows = users.filter(u => u.email !== currentUser.email).map(u => {
+    const roomId = chatDmRoomId(currentUser.email, u.email);
+    const msgs = chatMessagesByRoom[roomId] || [];
+    const last = msgs[msgs.length - 1];
+    return { u, roomId, last, unread: chatUnreadCount(roomId) };
+  }).sort((a,b) => (b.last ? b.last.ts : 0) - (a.last ? a.last.ts : 0));
+
+  listEl.innerHTML = `
+    <button type="button" class="chat-conv-row" data-chat-action="open-room" data-room="general">
+      <div class="chat-conv-avatar chat-conv-avatar-group">👥</div>
+      <div class="chat-conv-info">
+        <div class="chat-conv-name">Chat general</div>
+        <div class="chat-conv-preview">${lastGeneral ? esc(`${lastGeneral.fromEmail===currentUser.email?'Tú':lastGeneral.fromName}: ${lastGeneral.text}`) : 'Sin mensajes todavía'}</div>
+      </div>
+      ${generalUnread>0 ? `<span class="chat-conv-unread">${generalUnread>9?'9+':generalUnread}</span>` : ''}
+    </button>
+    ${rows.map(r => `
+      <button type="button" class="chat-conv-row" data-chat-action="open-room" data-room="${esc(r.roomId)}" data-peer-email="${esc(r.u.email)}" data-peer-name="${esc(r.u.name)}">
+        <div class="chat-conv-avatar">${esc((r.u.name||'?').trim().charAt(0).toUpperCase())}</div>
+        <div class="chat-conv-info">
+          <div class="chat-conv-name">${esc(r.u.name)}</div>
+          <div class="chat-conv-preview">${r.last ? esc(`${r.last.fromEmail===currentUser.email?'Tú: ':''}${r.last.text}`) : 'Sin mensajes todavía'}</div>
+        </div>
+        ${r.unread>0 ? `<span class="chat-conv-unread">${r.unread>9?'9+':r.unread}</span>` : ''}
+      </button>
+    `).join('') || '<p class="chat-empty">No hay más usuarios en la plataforma todavía.</p>'}
+  `;
+}
+
+function renderChatThreadMessages(){
+  const el = chatWidgetEl.querySelector('#chat-thread-messages');
+  if (!el || !chatActiveRoom) return;
+  const msgs = chatMessagesByRoom[chatActiveRoom] || [];
+  const wasNearBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < 60;
+  el.innerHTML = msgs.length
+    ? msgs.map(m => `
+        <div class="chat-msg ${m.fromEmail===currentUser.email ? 'chat-msg-mine' : 'chat-msg-theirs'}">
+          ${m.fromEmail===currentUser.email ? '' : `<div class="chat-msg-author">${esc(m.fromName)}</div>`}
+          <div class="chat-msg-bubble">${esc(m.text)}</div>
+          <div class="chat-msg-time">${chatFmtTime(m.ts)}</div>
+        </div>
+      `).join('')
+    : '<p class="chat-empty">Todavía no hay mensajes. ¡Escribe el primero!</p>';
+  if (wasNearBottom || msgs.length <= 20) el.scrollTop = el.scrollHeight;
+  chatMarkRoomRead(chatActiveRoom);
+  updateChatBadge();
+}
+
+function wireChatEvents(){
+  if (!chatWidgetEl || chatWidgetEl.dataset.wired) return;
+  chatWidgetEl.dataset.wired = '1';
+  chatWidgetEl.addEventListener('click', (e) => {
+    if (e.target.closest('#chat-bubble-btn')){
+      chatOpen = !chatOpen;
+      renderChatWidget();
+      return;
+    }
+    const actionEl = e.target.closest('[data-chat-action]');
+    if (!actionEl) return;
+    const act = actionEl.dataset.chatAction;
+    if (act === 'close'){
+      chatOpen = false;
+      renderChatWidget();
+    } else if (act === 'back'){
+      chatView = 'list';
+      chatActiveRoom = null;
+      chatActivePeer = null;
+      renderChatWidget();
+    } else if (act === 'open-room'){
+      chatActiveRoom = actionEl.dataset.room;
+      chatActivePeer = actionEl.dataset.peerEmail ? { email: actionEl.dataset.peerEmail, name: actionEl.dataset.peerName } : null;
+      chatView = 'thread';
+      renderChatWidget();
+    }
+  });
+  chatWidgetEl.addEventListener('submit', (e) => {
+    const form = e.target.closest('#chat-compose-form');
+    if (!form) return;
+    e.preventDefault();
+    const input = form.querySelector('#chat-compose-input');
+    const text = input.value;
+    input.value = '';
+    sendChatMessage(text);
+  });
 }
 
 /* ================= MANEJO DE EVENTOS ================= */

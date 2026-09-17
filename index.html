@@ -321,6 +321,9 @@ html[data-theme="dark"] .btn-text{ color:var(--muted); }
   background:var(--card); box-shadow:var(--shadow-sm);
 }
 @media (max-width:640px){ .mapa-box{ height:420px; } }
+.horizonte-list{ display:flex; flex-direction:column; gap:0; max-height:280px; overflow-y:auto; }
+.horizonte-item{ border-bottom:1px solid var(--line); padding:8px 0; }
+.horizonte-item:last-child{ border-bottom:none; }
 .leaflet-popup-content-wrapper, .leaflet-popup-tip{ background:var(--card); color:var(--ink); }
 .leaflet-popup-content-wrapper{ border-radius:var(--r-sm); box-shadow:var(--shadow-md); }
 .leaflet-container{ font-family:'Inter', -apple-system, sans-serif; background:var(--paper); }
@@ -520,6 +523,7 @@ const FIELD_GROUPS = [
     {key:'fAprobCot', label:'Fecha aprobación cotización', type:'date'},
   ]},
   { key:'ejecucion', title:'Ejecución de obra', fields:[
+    {key:'fCompraEquipos', label:'Fecha compra equipos', type:'date'},
     {key:'fInicioObra', label:'Fecha inicio real de obra', type:'date'},
     {key:'fPruebas', label:'Fecha pruebas de funcionamiento', type:'date'},
     {key:'fEntrega', label:'Fecha entrega al cliente (inicio garantía)', type:'date'},
@@ -545,7 +549,7 @@ const EXPORT_HEADERS = [
   ['cliente','CLIENTE'],['sede','SEDE'],['coordinador','COORDINADOR DEL PROYECTO'],
   ['estado','ESTADO'],['contratista','CONTRATISTA'],['nCotizacion','N° DE COTIZACIÓN'],
   ['fEnvioCot','FECHA ENVÍO COTIZACIÓN CLIENTE'],['fAprobCot','FECHA APROBACIÓN COTIZACIÓN CLIENTE'],
-  ['fInicioObra','FECHA INICIO REAL DE OBRA'],['fPruebas','FECHA DE PRUEBAS FUNCIONAMIENTO EQUIPOS'],
+  ['fInicioObra','FECHA INICIO REAL DE OBRA'],['fCompraEquipos','FECHA COMPRA EQUIPOS'],['fPruebas','FECHA DE PRUEBAS FUNCIONAMIENTO EQUIPOS'],
   ['fEntrega','FECHA DE ENTREGA AL CLIENTE (INICIO GARANTÍA)'],['fFinGarantia','FÍN DE GARANTÍA'],
   ['tiempoEjecucion','TIEMPO DE EJECUCIÓN (días)'],['tuberia','TUBERÍA %'],['cableado','CABLEADO %'],
   ['equipos','EQUIPOS %'],['avance','% AVANCE TOTAL'],['tipoCiudad','TIPO DE CIUDAD'],['mes','MES'],
@@ -569,6 +573,8 @@ let authView = 'login';
 let authError = '';
 let charts = {};
 let mapInstance = null; // instancia de Leaflet de la pestaña Mapa
+let mapaEstadoFilter = new Set(); // estados activos en el filtro del mapa (vacío = todos)
+let mapaHorizonteDias = 15; // ventana de días para "próximos a iniciar" / "próximos a entregar"
 // Coordenadas de ciudades resueltas automáticamente (ver geocodeCity más
 // abajo) para ciudades que NO están en el diccionario fijo CIUDAD_COORDS.
 // Se comparte entre todas las personas guardándose en Firestore junto con
@@ -755,6 +761,7 @@ function listByWeek(dateField, buckets){
 // vez de ensuciar el promedio).
 const STAGE_TRANSITIONS = [
   { key:'cot_aprob',      label:'Envío cotización → Aprobación',  from:'fEnvioCot',    to:'fAprobCot',         color:'#3B7DD8' },
+  { key:'compra_inicio',  label:'Compra de equipos → Inicio de obra', from:'fCompraEquipos', to:'fInicioObra',  color:'#A65D2E' },
   { key:'aprob_inicio',   label:'Aprobación → Inicio de obra',    from:'fAprobCot',    to:'fInicioObra',       color:'#7A5FC0' },
   { key:'inicio_entrega', label:'Inicio de obra → Entrega',       from:'fInicioObra',  to:'fEntrega',          color:'#D9BA00' },
   { key:'entrega_oc',     label:'Entrega → OC recibida',          from:'fEntrega',     to:'fRecepcionOC',      color:'#E08A2C' },
@@ -843,9 +850,10 @@ function geocodeCity(cityName){
       }
     });
 }
-function cityProjectSummary(){
+function cityProjectSummary(estadoFilter){
   const byCity = {};
   projects.forEach(p => {
+    if (estadoFilter && estadoFilter.size && !estadoFilter.has(p.estado)) return;
     const key = (p.ciudad || '').trim().toUpperCase();
     if (!key) return;
     if (!byCity[key]) byCity[key] = { ciudad: p.ciudad, total:0, porEstado:{}, proyectos:[] };
@@ -854,6 +862,48 @@ function cityProjectSummary(){
     byCity[key].proyectos.push({ nombre: `${p.cliente || 'Proyecto'} — ${p.sede || ''}`.replace(/ — $/, ''), estado: p.estado || 'Sin estado' });
   });
   return Object.values(byCity).sort((a,b)=>b.total-a.total);
+}
+// Color del círculo de una ciudad en el mapa: el del estado que más se
+// repite entre sus proyectos (después de aplicar el filtro de estado, si
+// hay uno). Así, si se filtra por un solo estado, todos los círculos quedan
+// exactamente del color de ese estado; si se ven "todos", cada ciudad se
+// pinta según su estado predominante.
+function dominantEstadoColor(cityEntry){
+  let best = null, bestN = -1;
+  Object.entries(cityEntry.porEstado).forEach(([estado, n]) => {
+    if (n > bestN){ bestN = n; best = estado; }
+  });
+  return STATUS_COLORS[best] || '#8c8c86';
+}
+// Clasifica los proyectos según fecha de inicio real de obra (fInicioObra) y
+// fecha de entrega al cliente (fEntrega), comparadas contra "hoy":
+//  - Próximos a iniciar: la obra tiene fecha de inicio definida y cae dentro
+//    de los próximos `dias` días (todavía no ha empezado).
+//  - En proceso: la obra ya inició (fInicioObra <= hoy) y aún no se ha
+//    entregado (fEntrega vacía o futura).
+//  - Próximos a entregar: hay fecha de entrega definida, todavía no llegó,
+//    y cae dentro de los próximos `dias` días.
+function proyectosPorHorizonte(dias){
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  const limite = new Date(hoy); limite.setDate(limite.getDate() + dias);
+  const proximosIniciar = [], enProceso = [], proximosEntregar = [];
+  projects.forEach(p => {
+    const inicio = parseDateSafe(p.fInicioObra);
+    const entrega = parseDateSafe(p.fEntrega);
+    if (inicio && inicio >= hoy && inicio <= limite){
+      proximosIniciar.push({ p, fecha: inicio });
+    }
+    if (inicio && inicio <= hoy && (!entrega || entrega > hoy)){
+      enProceso.push({ p, fecha: inicio });
+    }
+    if (entrega && entrega >= hoy && entrega <= limite){
+      proximosEntregar.push({ p, fecha: entrega });
+    }
+  });
+  proximosIniciar.sort((a,b) => a.fecha - b.fecha);
+  enProceso.sort((a,b) => a.fecha - b.fecha);
+  proximosEntregar.sort((a,b) => a.fecha - b.fecha);
+  return { proximosIniciar, enProceso, proximosEntregar };
 }
 
 function computeStageTimings(){
@@ -1524,30 +1574,82 @@ function renderProyectosResults(list){
 /* ----- ANÁLISIS ----- */
 /* ----- MAPA ----- */
 function renderMapa(){
-  const summary = cityProjectSummary();
-  const withCoords = summary.filter(c => getCityCoords(c.ciudad));
-  const withoutCoords = summary.filter(c => !getCityCoords(c.ciudad));
+  const filteredSummary = cityProjectSummary(mapaEstadoFilter);
+  const withoutCoords = filteredSummary.filter(c => !getCityCoords(c.ciudad));
+  const horizonte = proyectosPorHorizonte(mapaHorizonteDias);
   return `
     <section class="panel">
-      <div>
-        <h3 class="chart-title" style="margin-bottom:2px">Proyectos por ciudad en el mapa</h3>
-        <p class="auth-note" style="margin-bottom:14px">Cada círculo es una ciudad con proyectos; el tamaño y el número reflejan cuántos proyectos hay allí. Toca un círculo para ver el detalle por estado.</p>
+      <div class="toolbar">
+        <div>
+          <h3 class="chart-title" style="margin-bottom:2px">Proyectos por ciudad en el mapa</h3>
+          <p class="auth-note" style="margin-bottom:10px">Cada círculo es una ciudad; su tamaño refleja cuántos proyectos hay allí y su color, el estado predominante. Filtra por estado para ver solo esos proyectos.</p>
+        </div>
+        <div class="toolbar-right">
+          <button class="btn btn-outline" data-action="export-mapa-pdf">Descargar informe de estado (PDF)</button>
+        </div>
       </div>
+
+      <div class="status-chip-row" style="margin-bottom:14px">
+        ${STATUSES.map(st => `
+          <button class="status-chip ${mapaEstadoFilter.has(st)?'active':''}" style="--chip-color:${STATUS_COLORS[st]}" data-action="toggle-mapa-estado-filter" data-status="${esc(st)}">
+            ${st} <span class="status-chip-count">${projects.filter(p=>p.estado===st).length}</span>
+          </button>
+        `).join('')}
+        ${mapaEstadoFilter.size ? `<button class="btn btn-text" data-action="clear-mapa-filter">Ver todos los estados</button>` : ''}
+      </div>
+
       <div id="mapaProyectos" class="mapa-box"></div>
       ${withoutCoords.length ? `
         <p class="auth-note" style="margin-top:10px">
           Ubicando en el mapa automáticamente: ${withoutCoords.map(c=>esc(c.ciudad)).join(', ')}. Si en unos segundos no aparece, es una ciudad que el geocodificador no pudo reconocer con ese nombre.
         </p>
       ` : ''}
+
       <div class="table-wrap" style="margin-top:16px">
         <table class="data-table">
-          <thead><tr><th>Ciudad</th><th>Proyectos</th></tr></thead>
+          <thead><tr><th>Ciudad</th><th>Proyectos${mapaEstadoFilter.size ? ' (con el filtro aplicado)' : ''}</th></tr></thead>
           <tbody>
-            ${summary.map(c => `<tr><td class="cell-strong">${esc(c.ciudad)}</td><td>${c.total}</td></tr>`).join('') || `<tr><td colspan="2" class="empty-row">No hay proyectos con ciudad registrada.</td></tr>`}
+            ${filteredSummary.map(c => `<tr><td class="cell-strong">${esc(c.ciudad)}</td><td>${c.total}</td></tr>`).join('') || `<tr><td colspan="2" class="empty-row">No hay proyectos que coincidan con el filtro.</td></tr>`}
           </tbody>
         </table>
       </div>
+
+      <div class="toolbar" style="margin-top:28px">
+        <div>
+          <h3 class="chart-title" style="margin-bottom:2px">Próximos a iniciar, en proceso y próximos a entregar</h3>
+          <p class="auth-note">Con base en la fecha de inicio real de obra y la fecha de entrega al cliente.</p>
+        </div>
+        <div class="toolbar-right">
+          <select class="text-input" style="width:auto" data-mapa-horizonte>
+            <option value="7" ${mapaHorizonteDias===7?'selected':''}>Próximos 7 días</option>
+            <option value="15" ${mapaHorizonteDias===15?'selected':''}>Próximos 15 días</option>
+            <option value="30" ${mapaHorizonteDias===30?'selected':''}>Próximos 30 días</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="panel-row">
+        ${renderHorizonteColumn('Próximos a iniciar', horizonte.proximosIniciar, 'Inicia')}
+        ${renderHorizonteColumn('En proceso', horizonte.enProceso, 'Inició')}
+        ${renderHorizonteColumn('Próximos a entregar', horizonte.proximosEntregar, 'Entrega')}
+      </div>
     </section>
+  `;
+}
+function renderHorizonteColumn(title, items, fechaLabel){
+  return `
+    <div class="chart-box">
+      <h3 class="chart-title">${title} <span class="status-chip-count">(${items.length})</span></h3>
+      <div class="horizonte-list">
+        ${items.map(({p, fecha}) => `
+          <div class="horizonte-item">
+            <div class="cell-strong">${esc(p.cliente||'—')}</div>
+            <div class="cell-sub">${esc(p.sede||'—')} · ${esc(p.ciudad||'—')}</div>
+            <div class="cell-sub">${fechaLabel}: ${fmtDate(fecha)}</div>
+          </div>
+        `).join('') || `<p class="empty-row">Ninguno en este rango.</p>`}
+      </div>
+    </div>
   `;
 }
 
@@ -1573,21 +1675,27 @@ function buildMap(){
   }
   const dark = getTheme() === 'dark';
   const map = L.map(container, { scrollWheelZoom:false }).setView([4.6, -74.1], 5.4);
-  // OpenStreetMap estándar: 100% gratuito, sin API key ni registro, y sin
-  // límites que afecten a un panel interno como este (a diferencia de
-  // proveedores como CARTO/Mapbox/Google Maps, que ya exigen cuenta o llave
-  // para uso en producción). Para el modo oscuro no hace falta un segundo
-  // servidor de mapas "de pago": se le aplica un filtro CSS solo a las
-  // teselas (ver .mapa-box-dark más abajo), así los marcadores y el popup
-  // conservan sus colores de marca intactos.
+  // Tiles de Esri (World Street Map): servicio público, gratuito y sin API
+  // key para este tipo de uso. Las alternativas probadas antes fallaban por
+  // motivos distintos: tile.openstreetmap.org bloquea (403) tráfico
+  // repetido sin un Referer "real" de un dominio propio; CARTO ahora exige
+  // API key para sus basemaps raster (de ahí la marca de agua "API KEY
+  // REQUIRED"); y Wikimedia Maps en realidad solo está habilitado para
+  // sitios de la propia Fundación Wikimedia, por eso al hacer zoom (pedir
+  // teselas nuevas que no estaban en caché) el servidor las rechazaba y el
+  // mapa se quedaba en blanco. El servicio legacy de Esri no tiene esa
+  // restricción de dominio. Nota: Esri usa el orden {z}/{y}/{x} en la URL
+  // (al revés que la mayoría de proveedores). Para el modo oscuro no hace
+  // falta un segundo servidor "de pago": se le aplica un filtro CSS solo a
+  // las teselas (ver .mapa-box-dark más abajo), así los marcadores y el
+  // popup conservan sus colores de marca intactos.
   container.classList.toggle('mapa-box-dark', dark);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> colaboradores',
-    subdomains: ['a','b','c'],
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom',
     maxZoom: 19,
   }).addTo(map);
 
-  const summary = cityProjectSummary();
+  const summary = cityProjectSummary(mapaEstadoFilter);
   let maxTotal = 1;
   summary.forEach(c => { if (c.total > maxTotal) maxTotal = c.total; });
 
@@ -1606,7 +1714,7 @@ function buildMap(){
       radius,
       color: '#141414',
       weight: 1.5,
-      fillColor: '#F6D500',
+      fillColor: dominantEstadoColor(c),
       fillOpacity: 0.85,
     }).addTo(map);
     const detalle = Object.entries(c.porEstado)
@@ -2584,6 +2692,13 @@ function onRootClick(e){
       if (filters.estado.has(st)) filters.estado.delete(st); else filters.estado.add(st);
       render(); break;
     }
+    case 'toggle-mapa-estado-filter': {
+      const st = btn.dataset.status;
+      if (mapaEstadoFilter.has(st)) mapaEstadoFilter.delete(st); else mapaEstadoFilter.add(st);
+      render(); break;
+    }
+    case 'clear-mapa-filter': mapaEstadoFilter = new Set(); render(); break;
+    case 'export-mapa-pdf': exportMapaPDF(); break;
     case 'clear-filters':
       filters = { estado:new Set(), contratista:'', ciudad:'', coordinador:'', search:'' };
       render(); break;
@@ -2617,6 +2732,11 @@ function onRootClick(e){
 }
 
 function onRootChange(e){
+  if (e.target.matches('[data-mapa-horizonte]')){
+    mapaHorizonteDias = Number(e.target.value) || 15;
+    render();
+    return;
+  }
   const sel = e.target.closest('[data-filter]');
   if (sel){
     filters[sel.dataset.filter] = sel.value;
@@ -3041,6 +3161,77 @@ function exportProjectPDF(p){
   const safeName = (p.cliente || 'proyecto').replace(/[^\w\- ]+/g,'').trim().replace(/\s+/g,'_');
   doc.save(`Ficha_${safeName || 'proyecto'}_${p.id}.pdf`);
   logChange({ project: p.cliente || '—', text:`Exportó la ficha del proyecto "${p.cliente||'—'} — ${p.sede||''}" a PDF.` });
+}
+
+/* ---------- Informe de estado desde la pestaña Mapa (PDF) ---------- */
+function exportMapaPDF(){
+  if (typeof window.jspdf === 'undefined'){
+    alert('No se pudo cargar la librería de PDF. Revisa tu conexión a internet y actualiza la página.');
+    return;
+  }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'pt', format:'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const marginX = 40;
+  let y = 48;
+
+  doc.setFillColor(20,20,20);
+  doc.rect(0, 0, pageWidth, 70, 'F');
+  doc.setTextColor(255,255,255);
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(16);
+  doc.text('Informe de estado de proyectos', marginX, 30);
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(10);
+  doc.text('Syntesys Tecnológica S.A.S — Estado General de Proyectos DC', marginX, 48);
+  doc.setFontSize(9);
+  doc.text(`Generado el ${fmtDateTime(new Date().toISOString())}`, marginX, 62);
+  y = 100;
+
+  const tableStyle = {
+    theme:'grid',
+    styles:{ font:'helvetica', fontSize:9.5, cellPadding:5, textColor:[20,20,20], lineColor:[228,225,214] },
+    headStyles:{ fillColor:[20,20,20], textColor:[246,213,0], fontStyle:'bold', fontSize:10 },
+    margin:{ left:marginX, right:marginX },
+  };
+
+  // 1) Cantidad de proyectos por estado (total y, ya independiente, la
+  //    cantidad de cada uno de los estados).
+  doc.setTextColor(20,20,20);
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(12);
+  doc.text('Cantidad de proyectos por estado', marginX, y);
+  y += 8;
+  const estadosBody = STATUSES.map(st => [st, String(projects.filter(p=>p.estado===st).length)]);
+  estadosBody.push(['Total', String(projects.length)]);
+  doc.autoTable({ ...tableStyle, startY:y+8, head:[['Estado','Cantidad de proyectos']], body:estadosBody });
+  y = doc.lastAutoTable.finalY + 24;
+
+  // 2) Las tres listas por fecha (mismo horizonte de días que se ve en la
+  //    pantalla al momento de exportar).
+  const horizonte = proyectosPorHorizonte(mapaHorizonteDias);
+  const horizonteTable = (titulo, items, fechaLabel) => {
+    if (y > 680){ doc.addPage(); y = 48; }
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(12);
+    doc.text(`${titulo} (próximos ${mapaHorizonteDias} días) — ${items.length}`, marginX, y);
+    y += 8;
+    doc.autoTable({
+      ...tableStyle,
+      startY: y+8,
+      head:[['Cliente','Sede','Ciudad', fechaLabel]],
+      body: items.length
+        ? items.map(({p,fecha}) => [p.cliente||'—', p.sede||'—', p.ciudad||'—', fmtDate(fecha)])
+        : [['Ninguno en este rango.','','','']],
+    });
+    y = doc.lastAutoTable.finalY + 24;
+  };
+  horizonteTable('Próximos a iniciar', horizonte.proximosIniciar, 'Fecha de inicio');
+  horizonteTable('En proceso', horizonte.enProceso, 'Fecha de inicio');
+  horizonteTable('Próximos a entregar', horizonte.proximosEntregar, 'Fecha de entrega');
+
+  doc.save(`Informe_estado_proyectos_${new Date().toISOString().slice(0,10)}.pdf`);
+  logChange({ project:'—', text:'Exportó el informe de estado de proyectos (mapa) a PDF.' });
 }
 
 /* ---------- Reporte ejecutivo mensual (Excel multi-hoja) ---------- */

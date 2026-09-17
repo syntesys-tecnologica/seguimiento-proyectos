@@ -1310,6 +1310,7 @@ function renderApp(){
           ${activeTab==='resumen' ? renderResumen() : ''}
           ${activeTab==='proyectos' ? renderProyectos() : ''}
           ${activeTab==='mapa' ? renderMapa() : ''}
+          ${activeTab==='proyeccion' ? renderProyeccion() : ''}
           ${activeTab==='analisis' ? renderAnalisis() : ''}
           ${activeTab==='auditoria' ? renderAuditoria() : ''}
           ${activeTab==='usuarios' ? renderUsuarios() : ''}
@@ -1354,6 +1355,7 @@ function renderTabs(){
     ['resumen','Resumen'],
     ['proyectos','Proyectos'],
     ['mapa','Mapa'],
+    ['proyeccion','Proyección'],
   ];
   // Análisis, Auditoría y Usuarios quedan reservadas al perfil administrador.
   if (canSeeAdminTabs(currentUser.role)) tabs.push(['analisis','Análisis'], ['auditoria','Auditoría'], ['usuarios','Usuarios']);
@@ -1584,16 +1586,12 @@ function renderProyectosResults(list){
 function renderMapa(){
   const filteredSummary = cityProjectSummary(mapaEstadoFilter);
   const withoutCoords = filteredSummary.filter(c => !getCityCoords(c.ciudad));
-  const horizonte = proyectosPorHorizonte(mapaHorizonteDias);
   return `
     <section class="panel">
       <div class="toolbar">
         <div>
           <h3 class="chart-title" style="margin-bottom:2px">Proyectos por ciudad en el mapa</h3>
           <p class="auth-note" style="margin-bottom:10px">Cada círculo es una ciudad; su tamaño refleja cuántos proyectos hay allí y su color, el estado predominante. Filtra por estado para ver solo esos proyectos.</p>
-        </div>
-        <div class="toolbar-right">
-          <button class="btn btn-outline" data-action="export-mapa-pdf">Descargar informe de estado (PDF)</button>
         </div>
       </div>
 
@@ -1621,8 +1619,26 @@ function renderMapa(){
           </tbody>
         </table>
       </div>
+    </section>
+  `;
+}
 
-      <div class="toolbar" style="margin-top:28px">
+/* ----- PROYECCIÓN (informe de estado + próximos a iniciar/en proceso/entregar) ----- */
+function renderProyeccion(){
+  const horizonte = proyectosPorHorizonte(mapaHorizonteDias);
+  return `
+    <section class="panel">
+      <div class="toolbar">
+        <div>
+          <h3 class="chart-title" style="margin-bottom:2px">Proyección de proyectos</h3>
+          <p class="auth-note" style="margin-bottom:10px">Informe de estado general y proyectos próximos a iniciar, en proceso y próximos a entregar.</p>
+        </div>
+        <div class="toolbar-right">
+          <button class="btn btn-outline" data-action="export-mapa-pdf">Descargar informe de estado (PDF)</button>
+        </div>
+      </div>
+
+      <div class="toolbar" style="margin-top:8px">
         <div>
           <h3 class="chart-title" style="margin-bottom:2px">Próximos a iniciar, en proceso y próximos a entregar</h3>
           <p class="auth-note">Con base en la fecha de inicio real de obra y la fecha de entrega al cliente.</p>

@@ -157,6 +157,8 @@ html[data-theme="dark"] .field-label{ color:var(--muted); }
 .auth-links a{ text-decoration:none; color:var(--charcoal); border-bottom:1px solid var(--line); transition:color .15s var(--ease), border-color .15s var(--ease); }
 .auth-links a:hover{ color:var(--ink); border-color:var(--ink); }
 .auth-hint{ margin-top:20px; font-size:12px; color:var(--muted); text-align:center; line-height:1.6; }
+.auth-hint a{ color:var(--muted); text-decoration:none; border-bottom:1px solid var(--line); transition:color .15s var(--ease), border-color .15s var(--ease); }
+.auth-hint a:hover{ color:var(--ink); border-color:var(--ink); }
 .auth-note{ font-size:13px; color:var(--muted); line-height:1.5; }
 .auth-error{ background:var(--danger-bg); color:var(--danger); font-size:13px; padding:10px 12px; border-left:3px solid var(--danger); margin-bottom:4px; border-radius:0 var(--r-sm) var(--r-sm) 0; }
 .auth-simulated-email{ background:#FFFBE0; border:1px dashed var(--yellow-dark); padding:14px 16px; margin-bottom:16px; border-radius:var(--r-sm); }
@@ -643,6 +645,12 @@ function esc(s){
 }
 function fmtDate(v){
   if (!v) return '—';
+  if (v instanceof Date){
+    if (isNaN(v.getTime())) return '—';
+    const dd = String(v.getDate()).padStart(2,'0');
+    const mm = String(v.getMonth()+1).padStart(2,'0');
+    return `${dd}/${mm}/${v.getFullYear()}`;
+  }
   if (/^\d{4}-\d{2}-\d{2}/.test(String(v))){
     const [y,m,d] = String(v).slice(0,10).split('-');
     return `${d}/${m}/${y}`;
@@ -1266,7 +1274,7 @@ function authLoginView(){
       <div class="auth-links">
       </div>
     </form>
-    <p class="auth-hint">Si perdiste tus credenciales, contacta al administrador de la plataforma.</p>
+    <p class="auth-hint">Si perdiste tus credenciales, contacta al administrador de la plataforma.<br /><a href="mailto:andres.florez@syntesys.co">andres.florez@syntesys.co</a></p>
   `;
 }
 
@@ -3207,28 +3215,46 @@ function exportMapaPDF(){
   doc.autoTable({ ...tableStyle, startY:y+8, head:[['Estado','Cantidad de proyectos']], body:estadosBody });
   y = doc.lastAutoTable.finalY + 24;
 
-  // 2) Las tres listas por fecha (mismo horizonte de días que se ve en la
-  //    pantalla al momento de exportar).
-  const horizonte = proyectosPorHorizonte(mapaHorizonteDias);
-  const horizonteTable = (titulo, items, fechaLabel) => {
+  // 2) Un detalle por cada estado, mostrando únicamente la(s) fecha(s) /
+  //    dato(s) que corresponden a esa etapa del proceso:
+  //    - POR INICIAR      → fecha de inicio de obra
+  //    - EN PROCESO        → fecha inicio real de obra + fecha entrega al cliente (inicio garantía)
+  //    - FINALIZADA        → fecha entrega al cliente (inicio garantía)
+  //    - LIQUIDADA         → fecha de liquidación al cliente
+  //    - OC SOLICITADA     → fecha de liquidación al cliente
+  //    - FACTURADA         → N° factura + fecha emisión factura
+  //    - RECAUDADO         → fecha de facturación de recaudo
+  const ESTADO_REPORT_FIELDS = {
+    'POR INICIAR':    [{ key:'fInicioObra',        label:'Fecha de inicio de obra' }],
+    'EN PROCESO':     [{ key:'fInicioObra',        label:'Fecha inicio real de obra' },
+                        { key:'fEntrega',           label:'Fecha entrega al cliente (inicio garantía)' }],
+    'FINALIZADA':     [{ key:'fEntrega',           label:'Fecha entrega al cliente (inicio garantía)' }],
+    'LIQUIDADA':      [{ key:'fLiquidacion',       label:'Fecha de liquidación al cliente' }],
+    'OC SOLICITADA':  [{ key:'fLiquidacion',       label:'Fecha de liquidación al cliente' }],
+    'FACTURADA':      [{ key:'nFactura',           label:'N° factura', text:true },
+                        { key:'fEmisionFactura',    label:'Fecha emisión factura' }],
+    'RECAUDADO':      [{ key:'fFacturacionRecaudo',label:'Fecha de facturación de recaudo' }],
+  };
+  STATUSES.filter(st => ESTADO_REPORT_FIELDS[st]).forEach(st => {
+    const campos = ESTADO_REPORT_FIELDS[st];
+    const items = projects.filter(p => p.estado === st);
+    if (!items.length) return; // Sin proyectos en este estado: no se exporta su tabla.
     if (y > 680){ doc.addPage(); y = 48; }
     doc.setFont('helvetica','bold');
     doc.setFontSize(12);
-    doc.text(`${titulo} (próximos ${mapaHorizonteDias} días) — ${items.length}`, marginX, y);
+    doc.text(`${st} — ${items.length}`, marginX, y);
     y += 8;
     doc.autoTable({
       ...tableStyle,
       startY: y+8,
-      head:[['Cliente','Sede','Ciudad', fechaLabel]],
-      body: items.length
-        ? items.map(({p,fecha}) => [p.cliente||'—', p.sede||'—', p.ciudad||'—', fmtDate(fecha)])
-        : [['Ninguno en este rango.','','','']],
+      head:[['Cliente','Sede','Ciudad', ...campos.map(c => c.label)]],
+      body: items.map(p => [
+        p.cliente||'—', p.sede||'—', p.ciudad||'—',
+        ...campos.map(c => c.text ? (p[c.key] || '—') : fmtDate(p[c.key])),
+      ]),
     });
     y = doc.lastAutoTable.finalY + 24;
-  };
-  horizonteTable('Próximos a iniciar', horizonte.proximosIniciar, 'Fecha de inicio');
-  horizonteTable('En proceso', horizonte.enProceso, 'Fecha de inicio');
-  horizonteTable('Próximos a entregar', horizonte.proximosEntregar, 'Fecha de entrega');
+  });
 
   doc.save(`Informe_estado_proyectos_${new Date().toISOString().slice(0,10)}.pdf`);
   logChange({ project:'—', text:'Exportó el informe de estado de proyectos (mapa) a PDF.' });

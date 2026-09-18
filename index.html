@@ -14,6 +14,7 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
@@ -224,6 +225,35 @@ html[data-theme="dark"] .btn-text{ color:var(--muted); }
 .topbar-user{ display:flex; flex-direction:column; align-items:flex-end; line-height:1.3; }
 .topbar-user-name{ font-size:13px; font-weight:600; }
 .topbar-user-email{ font-size:11px; color:#a8a8a8; }
+
+/* ----- Campana de notificaciones (últimas actualizaciones) ----- */
+.notif-wrap{ position:relative; }
+.notif-bell-btn{
+  position:relative; background:transparent; border:1px solid rgba(246,213,0,.55); color:var(--yellow);
+  width:38px; height:38px; border-radius:10px; font-size:17px; display:flex; align-items:center; justify-content:center;
+  cursor:pointer; transition:background .15s var(--ease), color .15s var(--ease);
+}
+.notif-bell-btn:hover{ background:var(--yellow); color:var(--black); }
+.notif-badge{
+  position:absolute; top:-5px; right:-5px; min-width:17px; height:17px; padding:0 4px; border-radius:9px;
+  background:#D64545; color:#fff; font-size:10.5px; font-weight:700; display:flex; align-items:center; justify-content:center;
+  line-height:1; border:2px solid var(--black);
+}
+.notif-backdrop{ position:fixed; inset:0; z-index:40; background:transparent; }
+.notif-dropdown{
+  position:absolute; top:calc(100% + 10px); right:0; width:360px; max-width:calc(100vw - 32px); z-index:41;
+  background:var(--panel-bg,#fff); color:var(--ink); border:1px solid var(--line); border-radius:12px;
+  box-shadow:0 14px 32px rgba(0,0,0,.18); padding:14px; max-height:70vh; overflow:hidden; display:flex; flex-direction:column;
+}
+html[data-theme="dark"] .notif-dropdown{ background:#1c1c1c; }
+.notif-dropdown-title{ font-weight:700; font-size:13.5px; margin-bottom:10px; display:flex; align-items:center; justify-content:space-between; }
+.notif-dropdown-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; overflow-y:auto; }
+.notif-dropdown-list li{ font-size:12.5px; display:flex; flex-wrap:wrap; gap:6px; border-bottom:1px solid var(--line); padding-bottom:8px; }
+.notif-dropdown-list li:last-child{ border-bottom:none; padding-bottom:0; }
+
+@media (max-width:640px){
+  .notif-dropdown{ position:fixed; top:auto; bottom:0; left:0; right:0; width:auto; max-width:none; border-radius:16px 16px 0 0; max-height:75vh; }
+}
 
 .app-body{ flex:1; max-width:1240px; margin:0 auto; width:100%; padding:0 28px 60px; }
 
@@ -465,6 +495,9 @@ html[data-theme="dark"] .form-section legend{ color:var(--muted); }
 .field label{ display:block; font-size:12px; color:var(--muted); margin-bottom:5px; }
 .field-hint{ font-size:11px; color:var(--muted); margin:5px 0 0; line-height:1.4; }
 .field-wide{ grid-column:1 / -1; }
+.tab-access-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px 14px; }
+.tab-access-item{ display:flex !important; align-items:center; gap:8px; font-size:13px; color:var(--ink); cursor:pointer; margin:0; }
+.tab-access-item input{ width:16px; height:16px; accent-color:var(--yellow); flex-shrink:0; cursor:pointer; }
 .date-field-row{ display:flex; gap:6px; align-items:center; }
 .date-field-row input[type="date"]{ flex:1; min-width:0; }
 .btn-clear-date{ flex:none; padding:6px 10px; font-size:12px; white-space:nowrap; }
@@ -592,6 +625,7 @@ let pendingDeleteId = null;
 const TRASH_RETENTION_DAYS = 30;
 let trash = [];
 let trashPanelOpen = false;
+let notifOpen = false; // panel desplegable de la campana de notificaciones
 let pendingPurgeId = null;
 let pendingEmptyTrash = false;
 let pendingArchiveAudit = false;
@@ -619,17 +653,83 @@ function toggleTheme(){
   try{ saved = localStorage.getItem('sy_dc_theme'); }catch(e){}
   applyTheme(saved || 'light');
 })();
-// Pestañas que NO existen para el perfil "usuario" básico: si el rol de la
-// persona cambia (o se restaura una sesión) mientras está en una de estas, la
-// devolvemos a "Resumen" para que no quede en una pantalla sin acceso.
-// Administrador y supervisor sí pueden verlas (el supervisor con permisos
-// reducidos dentro de cada una — ver canSeeAdminTabs).
+// Pestañas que NO existen para el perfil "usuario" básico por defecto: si el
+// rol de la persona cambia (o se restaura una sesión) mientras está en una de
+// estas, la devolvemos a "Resumen" para que no quede en una pantalla sin
+// acceso. Administrador y supervisor sí pueden verlas por defecto (el
+// supervisor con permisos reducidos dentro de cada una — ver canSeeAdminTabs).
 const ADMIN_ONLY_TABS = ['analisis','auditoria','usuarios'];
 // Administrador y supervisor comparten acceso de VISUALIZACIÓN a Análisis,
 // Auditoría y Usuarios. Las acciones que modifican datos (editar/eliminar
 // proyectos, archivar auditoría, gestionar usuarios) siguen exclusivas de
 // 'admin' y se validan aparte en cada pantalla/acción.
 function canSeeAdminTabs(role){ return role === 'admin' || role === 'supervisor'; }
+
+/* ---------- Control de acceso a pestañas, por persona ---------- */
+// Todas las pestañas que existen en la app, en el mismo orden en que se
+// muestran (ver renderTabs). Es la lista de referencia tanto para pintar los
+// checkboxes en el formulario de usuario como para decidir qué pestañas
+// terminan mostrándose en la barra de navegación de cada quien.
+const ALL_TAB_DEFS = [
+  ['resumen','Resumen'],
+  ['proyectos','Proyectos'],
+  ['mapa','Mapa'],
+  ['proyeccion','Proyección'],
+  ['analisis','Análisis'],
+  ['auditoria','Auditoría'],
+  ['usuarios','Usuarios'],
+];
+// Acceso por defecto según el rol, para cuando una persona todavía no tiene
+// un `tabAccess` propio configurado (cuentas creadas antes de esta función,
+// o a las que un administrador nunca les tocó nada aquí): el comportamiento
+// de siempre — pestañas base para todos, y las 3 reservadas solo si el rol
+// ya las veía.
+function defaultTabAccessForRole(role){
+  const access = { resumen:true, proyectos:true, mapa:true, proyeccion:true };
+  ADMIN_ONLY_TABS.forEach(k => { access[k] = canSeeAdminTabs(role); });
+  return access;
+}
+// Acceso efectivo de una persona: sus overrides guardados (`tabAccess`)
+// combinados sobre la base del rol, para que una pestaña nueva que se agregue
+// a la app en el futuro tenga un valor por defecto sensato aunque nadie la
+// haya configurado todavía.
+function getUserTabAccess(user){
+  const defaults = defaultTabAccessForRole(user ? user.role : 'user');
+  if (!user || !user.tabAccess) return defaults;
+  return { ...defaults, ...user.tabAccess };
+}
+// Un administrador SIEMPRE conserva acceso completo, sin importar lo que
+// diga su `tabAccess`: así ningún administrador puede quedar (por error propio
+// o de otro administrador) sin poder entrar a Usuarios a corregirlo.
+function hasTabAccess(user, tabKey){
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  return !!getUserTabAccess(user)[tabKey];
+}
+// Lee los checkboxes tab_<clave> de un formulario de usuario y arma el
+// objeto `tabAccess` a guardar. FormData solo incluye las casillas
+// marcadas, así que su sola presencia ya indica "activada".
+function readTabAccessFromForm(fd){
+  const access = {};
+  ALL_TAB_DEFS.forEach(([k]) => { access[k] = fd.has(`tab_${k}`); });
+  return access;
+}
+// Para el registro de auditoría: describe en una frase corta qué pestañas
+// se activaron o desactivaron al editar a una persona (o null si no cambió
+// nada), p. ej. "pestañas: +Análisis, -Usuarios".
+function describeTabAccessChanges(oldAccess, newAccess){
+  const on = [], off = [];
+  ALL_TAB_DEFS.forEach(([k,l]) => {
+    const before = !!oldAccess[k], after = !!newAccess[k];
+    if (before === after) return;
+    (after ? on : off).push(l);
+  });
+  if (!on.length && !off.length) return null;
+  const parts = [];
+  if (on.length) parts.push(`+${on.join(', +')}`);
+  if (off.length) parts.push(`-${off.join(', -')}`);
+  return `pestañas: ${parts.join(', ')}`;
+}
 
 const root = document.getElementById('root');
 
@@ -1128,7 +1228,7 @@ async function loadAll(){
   if (sessionEmail){
     const u = users.find(x => x.email.toLowerCase() === sessionEmail.toLowerCase());
     if (u){
-      currentUser = { name: u.name, email: u.email, role: u.role || 'user' };
+      currentUser = { name: u.name, email: u.email, role: u.role || 'user', tabAccess: u.tabAccess || null };
       activeTab = 'resumen';
     } else {
       await clearSession();
@@ -1187,8 +1287,8 @@ async function refreshData(){
     if (currentUser){
       const fresh = users.find(x => x.email.toLowerCase() === currentUser.email.toLowerCase());
       if (fresh){
-        currentUser = { name: fresh.name, email: fresh.email, role: fresh.role || 'user' };
-        if (!canSeeAdminTabs(currentUser.role) && ADMIN_ONLY_TABS.includes(activeTab)) activeTab = 'resumen';
+        currentUser = { name: fresh.name, email: fresh.email, role: fresh.role || 'user', tabAccess: fresh.tabAccess || null };
+        if (!hasTabAccess(currentUser, activeTab)) activeTab = 'resumen';
       } else {
         currentUser = null; authView = 'login';
         await clearSession();
@@ -1232,6 +1332,34 @@ function logChange(entry){
   // y luego archivarlo manualmente desde la pestaña Auditoría.
   if (changelog.length > 20000) changelog = changelog.slice(0,20000);
   persistChangelog();
+}
+/* ---------- Campana de notificaciones (últimas actualizaciones) ---------- */
+// Un perfil de usuario (no administrador) solo debe ver los cambios que él
+// mismo realizó, no los de los demás; un administrador ve todo el historial.
+function getVisibleChangelog(){
+  return canSeeAdminTabs(currentUser.role)
+    ? changelog
+    : changelog.filter(c => c.userEmail ? c.userEmail === currentUser.email : c.user === currentUser.name);
+}
+// "Visto hasta" se guarda en localStorage por persona y por navegador (no en
+// Firestore): es solo para desinflar el globo de la campana, no un dato que
+// deba sincronizarse entre dispositivos.
+function notifSeenKey(){
+  return `sy_dc_notif_seen_${currentUser ? currentUser.email : 'anon'}`;
+}
+function getLastSeenNotifTs(){
+  try{ return localStorage.getItem(notifSeenKey()) || ''; }catch(e){ return ''; }
+}
+function markNotifSeen(){
+  const list = getVisibleChangelog();
+  const newest = list[0] ? list[0].ts : new Date().toISOString();
+  try{ localStorage.setItem(notifSeenKey(), newest); }catch(e){}
+}
+function getUnreadNotifCount(){
+  const lastSeen = getLastSeenNotifTs();
+  const list = getVisibleChangelog();
+  if (!lastSeen) return list.length; // primera vez que este navegador ve la campana: todo cuenta como pendiente.
+  return list.filter(c => c.ts > lastSeen).length;
 }
 
 /* ---------- Render raíz ---------- */
@@ -1339,6 +1467,12 @@ function renderTopbar(){
       </div>
     </div>
     <div class="topbar-right">
+      <div class="notif-wrap">
+        <button class="notif-bell-btn" data-action="toggle-notifications" title="Últimas actualizaciones" aria-label="Últimas actualizaciones">
+          🔔${getUnreadNotifCount() > 0 ? `<span class="notif-badge">${getUnreadNotifCount() > 99 ? '99+' : getUnreadNotifCount()}</span>` : ''}
+        </button>
+        ${notifOpen ? renderNotifDropdown() : ''}
+      </div>
       <div class="topbar-user">
         <span class="topbar-user-name">${esc(currentUser.name)}</span>
         <span class="topbar-user-email">${esc(currentUser.email)}</span>
@@ -1349,16 +1483,36 @@ function renderTopbar(){
     </div>
   </header>`;
 }
+// Panel desplegable de la campana: las mismas "últimas actualizaciones" que
+// antes vivían siempre visibles en la pestaña Resumen, ahora solo aparecen
+// al pedirlas — así esa pestaña queda más limpia.
+function renderNotifDropdown(){
+  const visibleChangelog = getVisibleChangelog();
+  return `
+    <div class="notif-backdrop" data-action="close-notifications"></div>
+    <div class="notif-dropdown" data-stop-close>
+      <div class="notif-dropdown-title">
+        <span>Últimas actualizaciones</span>
+        <button class="btn btn-text" data-action="close-notifications" style="padding:0;">Cerrar</button>
+      </div>
+      <ul class="notif-dropdown-list">
+        ${visibleChangelog.slice(0,20).map(c => `
+          <li>
+            <span class="mini-log-user">${esc(c.user)}</span>
+            ${c.project && c.project !== '—' ? `<span class="mini-log-project">${esc(c.project)}</span>` : ''}
+            <span class="mini-log-text">${esc(c.text)}</span>
+            <span class="mini-log-time">${fmtDateTime(c.ts)}</span>
+          </li>`).join('') || `<li class="mini-log-empty">${canSeeAdminTabs(currentUser.role) ? 'Aún no hay cambios registrados.' : 'Todavía no has realizado cambios.'}</li>`}
+      </ul>
+    </div>
+  `;
+}
 
 function renderTabs(){
-  const tabs = [
-    ['resumen','Resumen'],
-    ['proyectos','Proyectos'],
-    ['mapa','Mapa'],
-    ['proyeccion','Proyección'],
-  ];
-  // Análisis, Auditoría y Usuarios quedan reservadas al perfil administrador.
-  if (canSeeAdminTabs(currentUser.role)) tabs.push(['analisis','Análisis'], ['auditoria','Auditoría'], ['usuarios','Usuarios']);
+  // Qué pestañas se muestran depende del acceso de cada persona (ver
+  // hasTabAccess): por defecto sigue el rol, pero un administrador puede
+  // haber activado o desactivado pestañas puntuales desde Usuarios.
+  const tabs = ALL_TAB_DEFS.filter(([k]) => hasTabAccess(currentUser, k));
   return `<nav class="tabs">
     ${tabs.map(([k,l])=>`<button class="tab-btn ${activeTab===k?'active':''}" data-action="set-tab" data-tab="${k}">${l}</button>`).join('')}
   </nav>`;
@@ -1370,12 +1524,6 @@ function renderResumen(){
   const recaudados = projects.filter(p => p.estado === 'RECAUDADO').length;
   const avgAvance = total ? Math.round((recaudados/total)*100) : 0;
   const kpis = STATUSES.map(st => ({ st, count: projects.filter(p=>p.estado===st).length }));
-
-  // Un perfil de usuario (no administrador) solo debe ver en "Últimas
-  // actualizaciones" los cambios que él mismo realizó, no los de los demás.
-  const visibleChangelog = canSeeAdminTabs(currentUser.role)
-    ? changelog
-    : changelog.filter(c => c.userEmail ? c.userEmail === currentUser.email : c.user === currentUser.name);
 
   return `
     <section class="panel">
@@ -1391,21 +1539,6 @@ function renderResumen(){
             <div class="kpi-label">${k.st}</div>
           </div>
         `).join('')}
-      </div>
-
-      <div class="panel-row">
-        <div class="chart-box chart-box-wide">
-          <h3 class="chart-title">Últimas actualizaciones</h3>
-          <ul class="mini-log">
-            ${visibleChangelog.slice(0,8).map(c => `
-              <li>
-                <span class="mini-log-user">${esc(c.user)}</span>
-                ${c.project && c.project !== '—' ? `<span class="mini-log-project">${esc(c.project)}</span>` : ''}
-                <span class="mini-log-text">${esc(c.text)}</span>
-                <span class="mini-log-time">${fmtDateTime(c.ts)}</span>
-              </li>`).join('') || `<li class="mini-log-empty">${canSeeAdminTabs(currentUser.role) ? 'Aún no hay cambios registrados.' : 'Todavía no has realizado cambios.'}</li>`}
-          </ul>
-        </div>
       </div>
     </section>
   `;
@@ -1635,6 +1768,7 @@ function renderProyeccion(){
         </div>
         <div class="toolbar-right">
           <button class="btn btn-outline" data-action="export-mapa-pdf">Descargar informe de estado (PDF)</button>
+          <button class="btn btn-outline" data-action="export-mapa-docx">Descargar informe de estado (Word)</button>
         </div>
       </div>
 
@@ -1975,13 +2109,14 @@ function renderUsuarios(){
 
       <div class="table-wrap">
         <table class="data-table">
-          <thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Creado</th>${isAdmin ? '<th></th>' : ''}</tr></thead>
+          <thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Pestañas</th><th>Creado</th>${isAdmin ? '<th></th>' : ''}</tr></thead>
           <tbody>
             ${users.map(u => `
               <tr>
                 <td class="cell-strong">${esc(u.name)}</td>
                 <td>${esc(u.email)}</td>
                 <td><span class="status-pill" style="--chip-color:${roleChipColor(u.role)}">${roleLabel(u.role)}</span></td>
+                <td class="cell-sub">${u.role === 'admin' ? 'Todas' : `${ALL_TAB_DEFS.filter(([k])=>hasTabAccess(u,k)).length} de ${ALL_TAB_DEFS.length}`}</td>
                 <td class="cell-sub">${u.createdAt ? fmtDateTime(u.createdAt) : '—'}</td>
                 ${isAdmin ? `
                 <td class="cell-actions">
@@ -2005,10 +2140,15 @@ function renderUserModal(){
   const submitActions = { new:'do-create-user', reset:'do-reset-user', edit:'do-edit-user', self:'do-change-own-password' };
   const submitLabels = { new:'Crear persona', reset:'Restablecer contraseña', edit:'Guardar cambios', self:'Cambiar contraseña' };
   const editingUser = mode !== 'new' ? users.find(u => u.email === userModalState.email) : null;
+  // 'new' arranca con el rol "Usuario" seleccionado por defecto en el <select>,
+  // así que sus checkboxes parten del acceso por defecto de ese rol; en
+  // 'edit' parten de lo que esa persona ya tenga configurado (o, si nunca se
+  // tocó, del acceso por defecto de su rol actual).
+  const tabAccessForForm = mode === 'edit' ? getUserTabAccess(editingUser) : defaultTabAccessForRole('user');
 
   return `
   <div class="modal-overlay" data-action="close-user-modal-overlay">
-    <div class="modal-card modal-card-sm" data-stop-close>
+    <div class="modal-card ${mode==='new'||mode==='edit' ? '' : 'modal-card-sm'}" data-stop-close>
       <div class="modal-header">
         <h2>${titles[mode]}</h2>
         <button class="modal-close" data-action="close-user-modal">✕</button>
@@ -2037,6 +2177,7 @@ function renderUserModal(){
               <option value="admin">Administrador</option>
             </select>
           </div>
+          ${renderTabAccessFields(tabAccessForForm)}
         ` : ''}
 
         ${mode === 'edit' ? `
@@ -2056,6 +2197,7 @@ function renderUserModal(){
               <option value="admin" ${editingUser && editingUser.role==='admin' ? 'selected' : ''}>Administrador</option>
             </select>
           </div>
+          ${renderTabAccessFields(tabAccessForForm)}
         ` : ''}
 
         ${mode === 'reset' ? `
@@ -2086,6 +2228,26 @@ function renderUserModal(){
     </div>
   </div>`;
 }
+// Grilla de checkboxes con las pestañas que esa persona puede ver. Se
+// reutiliza en 'new' y 'edit'. Los nombres de campo van como tab_<clave>
+// para poder leerlos todos igual en doCreateUser/doEditUser.
+function renderTabAccessFields(access){
+  return `
+    <div class="field">
+      <label>Pestañas visibles para esta persona</label>
+      <p class="auth-note" style="margin:-2px 0 8px">Un administrador siempre tiene acceso completo, sin importar esta selección.</p>
+      <div class="tab-access-grid">
+        ${ALL_TAB_DEFS.map(([k,l]) => `
+          <label class="tab-access-item">
+            <input type="checkbox" name="tab_${k}" ${access[k] ? 'checked' : ''} />
+            <span>${l}</span>
+          </label>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
 
 function renderConfirmDeleteUser(){
   const u = users.find(x=>x.email===pendingDeleteUserEmail);
@@ -2153,6 +2315,7 @@ function renderModal(){
 
         <div class="modal-footer">
           ${!isNew ? `<button type="button" class="btn btn-outline" data-action="export-project-pdf" data-id="${d.id}">Exportar a PDF</button>` : ''}
+          ${!isNew ? `<button type="button" class="btn btn-outline" data-action="export-project-docx" data-id="${d.id}">Exportar a Word</button>` : ''}
           ${readOnly
             ? `<button type="button" class="btn btn-primary" data-action="close-modal">Cerrar</button>`
             : `<button type="button" class="btn btn-text" data-action="close-modal">Cancelar</button>
@@ -2616,7 +2779,7 @@ root.addEventListener('change', onRootChange);
 root.addEventListener('input', onRootInput);
 
 function onRootClick(e){
-  const overlay = e.target.closest('[data-action="close-modal-overlay"], [data-action="cancel-delete"], [data-action="close-user-modal-overlay"], [data-action="cancel-delete-user"], [data-action="cancel-archive-audit"], [data-action="close-trash-overlay"], [data-action="cancel-purge-item"], [data-action="cancel-empty-trash"]');
+  const overlay = e.target.closest('[data-action="close-modal-overlay"], [data-action="cancel-delete"], [data-action="close-user-modal-overlay"], [data-action="cancel-delete-user"], [data-action="cancel-archive-audit"], [data-action="close-trash-overlay"], [data-action="cancel-purge-item"], [data-action="cancel-empty-trash"], [data-action="close-notifications"]');
   if (overlay && !e.target.closest('[data-stop-close]')){
     const a = overlay.dataset.action;
     if (a === 'close-modal-overlay'){ modalState = null; }
@@ -2627,6 +2790,7 @@ function onRootClick(e){
     else if (a === 'close-trash-overlay'){ trashPanelOpen = false; }
     else if (a === 'cancel-purge-item'){ pendingPurgeId = null; }
     else if (a === 'cancel-empty-trash'){ pendingEmptyTrash = false; }
+    else if (a === 'close-notifications'){ notifOpen = false; }
     render();
     return;
   }
@@ -2669,7 +2833,19 @@ function onRootClick(e){
       if (p) exportProjectPDF(p);
       break;
     }
+    case 'export-project-docx': {
+      const p = projects.find(x=>x.id===Number(btn.dataset.id));
+      if (p) exportProjectDOCX(p);
+      break;
+    }
     case 'toggle-theme': toggleTheme(); break;
+    case 'toggle-notifications': {
+      notifOpen = !notifOpen;
+      if (notifOpen) markNotifSeen(); // al abrirla, el globo de pendientes se desinfla.
+      render();
+      break;
+    }
+    case 'close-notifications': notifOpen = false; render(); break;
     case 'save-current-filter': saveCurrentFilterAsFavorite(); break;
     case 'apply-saved-filter': applySavedFilter(Number(btn.dataset.filterId)); break;
     case 'delete-saved-filter': deleteSavedFilter(Number(btn.dataset.filterId)); break;
@@ -2723,6 +2899,7 @@ function onRootClick(e){
     }
     case 'clear-mapa-filter': mapaEstadoFilter = new Set(); render(); break;
     case 'export-mapa-pdf': exportMapaPDF(); break;
+    case 'export-mapa-docx': exportMapaDOCX(); break;
     case 'clear-filters':
       filters = { estado:new Set(), contratista:'', ciudad:'', coordinador:'', search:'' };
       render(); break;
@@ -2850,7 +3027,7 @@ function doLogin(fd){
     authError = 'Correo o contraseña incorrectos.';
     render(); return;
   }
-  currentUser = { name: user.name, email: user.email, role: user.role || 'user' };
+  currentUser = { name: user.name, email: user.email, role: user.role || 'user', tabAccess: user.tabAccess || null };
   authError = '';
   activeTab = 'resumen';
   saveSession(user.email);
@@ -2864,6 +3041,7 @@ async function doCreateUser(fd){
   const password = String(fd.get('password'));
   const roleRaw = String(fd.get('role') || '');
   const role = ['admin','supervisor','user'].includes(roleRaw) ? roleRaw : 'user';
+  const tabAccess = readTabAccessFromForm(fd);
   if (!name || !email || password.length < 6){
     userActionError = 'Completa todos los campos (contraseña de mínimo 6 caracteres).';
     render(); return;
@@ -2872,7 +3050,7 @@ async function doCreateUser(fd){
     userActionError = 'Ya existe una cuenta registrada con ese correo.';
     render(); return;
   }
-  users.push({ name, email, passHash: simpleHash(password), role, createdAt: new Date().toISOString() });
+  users.push({ name, email, passHash: simpleHash(password), role, tabAccess, createdAt: new Date().toISOString() });
   await persistUsers();
   logChange({ project:'—', text:`Creó el acceso de ${name} (${email}) como ${roleLabel(role).toLowerCase()}.` });
   userModalState = null;
@@ -2904,6 +3082,7 @@ async function doEditUser(fd){
   const email = String(fd.get('email')).trim().toLowerCase();
   const roleRaw = String(fd.get('role') || '');
   const role = ['admin','supervisor','user'].includes(roleRaw) ? roleRaw : 'user';
+  const tabAccess = readTabAccessFromForm(fd);
   if (!name || !email){
     userActionError = 'Completa el nombre y el correo.';
     render(); return;
@@ -2924,23 +3103,27 @@ async function doEditUser(fd){
   }
 
   const oldName = user.name, oldEmail = user.email, oldRole = user.role || 'user';
+  const oldTabAccess = getUserTabAccess(user);
   user.name = name;
   user.email = email;
   user.role = role;
+  user.tabAccess = tabAccess;
   await persistUsers();
 
   const changes = [];
   if (oldName !== name) changes.push(`nombre: "${oldName}" → "${name}"`);
   if (oldEmail.toLowerCase() !== email) changes.push(`correo: "${oldEmail}" → "${email}"`);
   if (oldRole !== role) changes.push(`rol: "${roleLabel(oldRole)}" → "${roleLabel(role)}"`);
+  const tabChanges = describeTabAccessChanges(oldTabAccess, tabAccess);
+  if (tabChanges) changes.push(tabChanges);
   logChange({ project:'—', text: changes.length ? `Editó a ${oldName}: ${changes.join(' · ')}.` : `Editó a ${oldName} sin cambios.` });
 
   // Si la persona se editó a sí misma, actualizamos su sesión activa y la
   // clave con la que se guarda su sesión persistente para que no se le
   // cierre la sesión ni pierda el acceso.
   if (currentUser && currentUser.email.toLowerCase() === oldEmail.toLowerCase()){
-    currentUser = { name: user.name, email: user.email, role: user.role || 'user' };
-    if (!canSeeAdminTabs(currentUser.role) && ADMIN_ONLY_TABS.includes(activeTab)) activeTab = 'resumen';
+    currentUser = { name: user.name, email: user.email, role: user.role || 'user', tabAccess: user.tabAccess || null };
+    if (!hasTabAccess(currentUser, activeTab)) activeTab = 'resumen';
     await saveSession(user.email);
   }
 
@@ -3186,8 +3369,409 @@ function exportProjectPDF(p){
   doc.save(`Ficha_${safeName || 'proyecto'}_${p.id}.pdf`);
   logChange({ project: p.cliente || '—', text:`Exportó la ficha del proyecto "${p.cliente||'—'} — ${p.sede||''}" a PDF.` });
 }
+// Dispara la descarga de un Blob ya generado (PDF vía jsPDF se descarga
+// solo con doc.save(); esto es lo que usan, en cambio, los archivos Word,
+// que Packer.toBlob() entrega como Blob en vez de descargarlos por sí solos).
+function downloadBlob(blob, filename){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+// Ficha de proyecto en Word (.docx): mismo contenido que exportProjectPDF
+// (los mismos FIELD_GROUPS y el avance de ejecución), armado con la
+// librería docx.js en vez de jsPDF.
+async function exportProjectDOCX(p){
+  if (typeof window.docx === 'undefined'){
+    alert('No se pudo cargar la librería de Word. Revisa tu conexión a internet y actualiza la página.');
+    return;
+  }
+  const { Document, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, ShadingType, HeadingLevel, Packer } = window.docx;
+
+  const darkShading = { fill:'141414', type:ShadingType.CLEAR, color:'auto' };
+  const headerRow = (title) => new TableRow({
+    children:[ new TableCell({
+      columnSpan:2, shading:darkShading,
+      children:[ new Paragraph({ children:[ new TextRun({ text:title, bold:true, color:'F6D500', size:20 }) ] }) ],
+    }) ],
+  });
+  const dataRow = (label, value) => new TableRow({
+    children:[
+      new TableCell({ width:{ size:35, type:WidthType.PERCENTAGE }, children:[ new Paragraph({ children:[ new TextRun({ text:label, bold:true, size:19 }) ] }) ] }),
+      new TableCell({ width:{ size:65, type:WidthType.PERCENTAGE }, children:[ new Paragraph({ children:[ new TextRun({ text:String(value ?? '—'), size:19 }) ] }) ] }),
+    ],
+  });
+
+  const children = [
+    new Paragraph({ children:[ new TextRun({ text:'Ficha de proyecto', bold:true, size:32 }) ] }),
+    new Paragraph({ children:[ new TextRun({ text:'Syntesys Tecnológica S.A.S — Estado General de Proyectos DC', size:18, color:'5A5A54' }) ] }),
+    new Paragraph({ children:[ new TextRun({ text:`Generado el ${fmtDateTime(new Date().toISOString())}`, size:16, color:'6B6B63' }) ], spacing:{ after:200 } }),
+    new Paragraph({ heading:HeadingLevel.HEADING_1, children:[ new TextRun(`${p.cliente || 'Proyecto sin nombre'} — ${p.sede || ''}`) ] }),
+    new Paragraph({ children:[ new TextRun({ text:`Estado actual: ${p.estado || '—'}    ·    Avance consolidado: ${computeAvance(p)}%`, size:19, color:'5A5A54' }) ], spacing:{ after:200 } }),
+  ];
+
+  FIELD_GROUPS.forEach(g => {
+    children.push(new Table({
+      width:{ size:100, type:WidthType.PERCENTAGE },
+      rows:[ headerRow(g.title), ...g.fields.map(f => dataRow(f.label, fieldValueForPrint(f, p))) ],
+    }));
+    children.push(new Paragraph({ text:'', spacing:{ after:200 } }));
+  });
+
+  children.push(new Table({
+    width:{ size:100, type:WidthType.PERCENTAGE },
+    rows:[
+      headerRow('Avance de ejecución'),
+      dataRow('Tubería', `${p.tuberia||0}%`),
+      dataRow('Cableado', `${p.cableado||0}%`),
+      dataRow('Equipos', `${p.equipos||0}%`),
+      dataRow('Avance total (consolidado)', `${computeAvance(p)}%`),
+    ],
+  }));
+
+  if (p.lastModifiedAt){
+    children.push(new Paragraph({ children:[ new TextRun({ text:`Última modificación: ${p.lastModifiedBy || '—'} el ${fmtDateTime(p.lastModifiedAt)}`, size:16, color:'6B6B63' }) ], spacing:{ before:200 } }));
+  }
+
+  const doc = new Document({ sections:[{ children }] });
+  const blob = await Packer.toBlob(doc);
+  const safeName = (p.cliente || 'proyecto').replace(/[^\w\- ]+/g,'').trim().replace(/\s+/g,'_');
+  downloadBlob(blob, `Ficha_${safeName || 'proyecto'}_${p.id}.docx`);
+  logChange({ project: p.cliente || '—', text:`Exportó la ficha del proyecto "${p.cliente||'—'} — ${p.sede||''}" a Word.` });
+}
 
 /* ---------- Informe de estado desde la pestaña Mapa (PDF) ---------- */
+// Convierte un color hexadecimal ('#F6D500') a un arreglo [r,g,b] que
+// jsPDF pueda usar directamente en setFillColor/setDrawColor.
+function hexToRgb(hex){
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || '');
+  return m ? [parseInt(m[1],16), parseInt(m[2],16), parseInt(m[3],16)] : [140,140,134];
+}
+// Las 4 etapas que se dibujan como tramos del Gantt, cada una delimitada
+// por dos fechas ya existentes del proyecto. Los colores se toman de los
+// mismos STATUS_COLORS que usa el resto de la app, para que el tramo de
+// "Facturación", por ejemplo, se vea del mismo morado que el estado
+// FACTURADA en cualquier otra pantalla.
+const GANTT_STAGES = [
+  { label:'Ejecución de obra',  full:'Ejecución de obra (inicio de obra → entrega)',            from:'fInicioObra',     to:'fEntrega',            color:hexToRgb(STATUS_COLORS['EN PROCESO']) },
+  { label:'Entrega / garantía', full:'Entrega / garantía (entrega → liquidación)',               from:'fEntrega',        to:'fLiquidacion',        color:hexToRgb(STATUS_COLORS['LIQUIDADA']) },
+  { label:'Facturación',        full:'Facturación (liquidación → emisión de factura)',           from:'fLiquidacion',    to:'fEmisionFactura',     color:hexToRgb(STATUS_COLORS['FACTURADA']) },
+  { label:'Recaudo',            full:'Recaudo (emisión de factura → facturación de recaudo)',    from:'fEmisionFactura', to:'fFacturacionRecaudo', color:hexToRgb(STATUS_COLORS['RECAUDADO']) },
+];
+const GANTT_CAPTION = 'Cada tramo cubre el período entre dos fechas del proyecto: inicio de obra → entrega → liquidación → emisión de factura → facturación de recaudo.';
+// Qué fecha(s) / dato(s) se muestran en la tabla de detalle de cada estado
+// del informe de estado (Proyección), tanto en PDF como en Word:
+//    - POR INICIAR      → fecha de inicio de obra
+//    - EN PROCESO        → fecha inicio real de obra + fecha entrega al cliente (inicio garantía)
+//    - FINALIZADA        → fecha entrega al cliente (inicio garantía)
+//    - LIQUIDADA         → fecha de liquidación al cliente
+//    - OC SOLICITADA     → fecha de liquidación al cliente
+//    - FACTURADA         → N° factura + fecha emisión factura
+//    - RECAUDADO         → fecha de facturación de recaudo
+const ESTADO_REPORT_FIELDS = {
+  'POR INICIAR':    [{ key:'fInicioObra',        label:'Fecha de inicio de obra' }],
+  'EN PROCESO':     [{ key:'fInicioObra',        label:'Fecha inicio real de obra' },
+                      { key:'fEntrega',           label:'Fecha entrega al cliente (inicio garantía)' }],
+  'FINALIZADA':     [{ key:'fEntrega',           label:'Fecha entrega al cliente (inicio garantía)' }],
+  'LIQUIDADA':      [{ key:'fLiquidacion',       label:'Fecha de liquidación al cliente' }],
+  'OC SOLICITADA':  [{ key:'fLiquidacion',       label:'Fecha de liquidación al cliente' }],
+  'FACTURADA':      [{ key:'nFactura',           label:'N° factura', text:true },
+                      { key:'fEmisionFactura',    label:'Fecha emisión factura' }],
+  'RECAUDADO':      [{ key:'fFacturacionRecaudo',label:'Fecha de facturación de recaudo' }],
+};
+// Construye la estructura de filas y el rango de fechas del Gantt a partir
+// de la lista de proyectos. La comparten drawGanttPDF (dibuja con jsPDF) y
+// renderGanttImage (dibuja en un <canvas> para incrustar como imagen en el
+// Word), así ambos formatos muestran exactamente la misma información.
+function buildGanttData(projectList){
+  const ganttRows = [];
+  STATUSES.forEach(st => {
+    const items = projectList
+      .filter(p => p.estado === st)
+      .filter(p => GANTT_STAGES.some(s => parseDateSafe(p[s.from]) && parseDateSafe(p[s.to])) || parseDateSafe(p.fInicioObra))
+      .sort((a,b) => (parseDateSafe(a.fInicioObra) || new Date(8640000000000000)) - (parseDateSafe(b.fInicioObra) || new Date(8640000000000000)));
+    if (!items.length) return;
+    ganttRows.push({ type:'group', estado:st, count:items.length });
+    items.forEach(p => ganttRows.push({ type:'project', p }));
+  });
+  if (!ganttRows.length) return null; // Ningún proyecto tiene fechas suficientes para graficar.
+
+  let minDate = null, maxDate = null;
+  const trackDate = (v) => {
+    const d = parseDateSafe(v);
+    if (!d) return;
+    if (!minDate || d < minDate) minDate = d;
+    if (!maxDate || d > maxDate) maxDate = d;
+  };
+  ganttRows.forEach(r => {
+    if (r.type !== 'project') return;
+    GANTT_STAGES.forEach(s => { trackDate(r.p[s.from]); trackDate(r.p[s.to]); });
+    trackDate(r.p.fInicioObra);
+  });
+  if (!minDate || !maxDate) return null;
+  minDate = new Date(minDate); minDate.setDate(minDate.getDate()-5);
+  maxDate = new Date(maxDate); maxDate.setDate(maxDate.getDate()+5);
+  const today = new Date(); today.setHours(0,0,0,0);
+  return { ganttRows, minDate, maxDate, today };
+}
+// Dibuja el diagrama de Gantt en páginas horizontales nuevas al final del
+// documento `doc`: una fila por proyecto, agrupadas por estado, con un
+// tramo de color por cada etapa cuyas dos fechas estén registradas. Si un
+// proyecto solo tiene la fecha de inicio de obra (aún no hay tramo real,
+// por ejemplo un "POR INICIAR" recién programado), se marca con un punto
+// en esa fecha en vez de una barra.
+function drawGanttPDF(doc, projectList){
+  const gdata = buildGanttData(projectList);
+  if (!gdata) return;
+  const { ganttRows, minDate, maxDate, today } = gdata;
+  const spanMs = Math.max(1, maxDate - minDate);
+  const monthNames = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+
+  const gMarginX = 40, labelColW = 190, rowH = 16, topOffset = 132, bottomMargin = 36;
+  let pw, ph, timelineLeft, timelineRight;
+  const xOf = (d) => timelineLeft + ((d - minDate) / spanMs) * (timelineRight - timelineLeft);
+
+  function drawGanttHeader(pageNum){
+    pw = doc.internal.pageSize.getWidth();
+    ph = doc.internal.pageSize.getHeight();
+    timelineLeft = gMarginX + labelColW;
+    timelineRight = pw - gMarginX;
+
+    doc.setFillColor(20,20,20);
+    doc.rect(0, 0, pw, 70, 'F');
+    doc.setTextColor(255,255,255);
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(16);
+    doc.text('Diagrama de Gantt — proyección por fechas de estado', gMarginX, 30);
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(10);
+    doc.text('Syntesys Tecnológica S.A.S — Estado General de Proyectos DC', gMarginX, 48);
+    doc.setFontSize(9);
+    doc.text(`Generado el ${fmtDateTime(new Date().toISOString())}${pageNum>1 ? ` · continuación (página ${pageNum} del diagrama)` : ''}`, gMarginX, 62);
+
+    // Leyenda de las 4 etapas, en su propia franja debajo del encabezado
+    // oscuro (con margen de sobra respecto al eje de meses de más abajo,
+    // para que ningún texto quede pisado por otro).
+    let lx = gMarginX;
+    const ly = 90;
+    doc.setFontSize(9);
+    GANTT_STAGES.forEach(s => {
+      doc.setFillColor(...s.color);
+      doc.rect(lx, ly-8, 10, 10, 'F');
+      doc.setDrawColor(180,180,172);
+      doc.rect(lx, ly-8, 10, 10, 'S');
+      doc.setTextColor(60,60,60);
+      doc.setFont('helvetica','normal');
+      doc.text(s.label, lx+14, ly);
+      lx += doc.getTextWidth(s.label) + 34;
+    });
+    // Descripción de qué representa cada tramo, en una línea aparte.
+    doc.setFontSize(7.5);
+    doc.setTextColor(130,130,122);
+    doc.text(GANTT_CAPTION, gMarginX, 106);
+    doc.setDrawColor(228,225,214);
+    doc.line(gMarginX, 116, pw-gMarginX, 116);
+
+    // Cuadrícula de meses y línea de "Hoy".
+    doc.setFontSize(8);
+    let cursor = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+    while (cursor <= maxDate){
+      const x = xOf(cursor);
+      if (x >= timelineLeft && x <= timelineRight){
+        doc.setDrawColor(228,225,214);
+        doc.line(x, topOffset-6, x, ph-bottomMargin);
+        doc.setTextColor(120,120,120);
+        doc.text(`${monthNames[cursor.getMonth()]} ${cursor.getFullYear()}`, x+2, topOffset-10);
+      }
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth()+1, 1);
+    }
+    if (today >= minDate && today <= maxDate){
+      const xt = xOf(today);
+      doc.setDrawColor(200,40,40);
+      doc.line(xt, topOffset-6, xt, ph-bottomMargin);
+      doc.setTextColor(200,40,40);
+      doc.setFontSize(8);
+      doc.text('Hoy', xt+2, topOffset-10);
+    }
+  }
+
+  let pageNum = 1;
+  doc.addPage('a4','landscape');
+  drawGanttHeader(pageNum);
+  let y = topOffset;
+  const maxY = () => ph - bottomMargin;
+  let zebra = false;
+
+  ganttRows.forEach(row => {
+    if (y + rowH > maxY()){
+      doc.addPage('a4','landscape');
+      pageNum++;
+      drawGanttHeader(pageNum);
+      y = topOffset;
+      zebra = false;
+    }
+    const rowTop = y;
+    if (row.type === 'group'){
+      doc.setFillColor(246,244,236);
+      doc.rect(gMarginX, rowTop, pw-2*gMarginX, rowH, 'F');
+      doc.setTextColor(20,20,20);
+      doc.setFont('helvetica','bold');
+      doc.setFontSize(9.5);
+      doc.text(`${row.estado} (${row.count})`, gMarginX+4, rowTop+rowH-5);
+      y += rowH;
+      zebra = false;
+      return;
+    }
+    if (zebra){
+      doc.setFillColor(250,249,245);
+      doc.rect(gMarginX, rowTop, pw-2*gMarginX, rowH, 'F');
+    }
+    zebra = !zebra;
+    const p = row.p;
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(8);
+    doc.setTextColor(40,40,40);
+    const label = `${p.cliente||'—'} — ${p.sede||'—'}`;
+    doc.text(doc.splitTextToSize(label, labelColW-8)[0], gMarginX+4, rowTop+rowH-5);
+
+    let drewAny = false;
+    GANTT_STAGES.forEach(s => {
+      const from = parseDateSafe(p[s.from]), to = parseDateSafe(p[s.to]);
+      if (from && to && to >= from){
+        const x1 = xOf(from), x2 = xOf(to);
+        doc.setFillColor(...s.color);
+        doc.setDrawColor(255,255,255);
+        doc.rect(Math.min(x1,x2), rowTop+3, Math.max(2, Math.abs(x2-x1)), rowH-7, 'FD');
+        drewAny = true;
+      }
+    });
+    if (!drewAny){
+      const inicio = parseDateSafe(p.fInicioObra);
+      if (inicio){
+        doc.setFillColor(...hexToRgb(STATUS_COLORS[p.estado] || '#8c8c86'));
+        doc.circle(xOf(inicio), rowTop+rowH/2, 3, 'F');
+      }
+    }
+    y += rowH;
+  });
+}
+// Dibuja el mismo diagrama de Gantt que drawGanttPDF, pero en un <canvas>
+// (todas las filas en una sola imagen alta, sin paginar) para poder
+// incrustarlo como PNG dentro del informe de estado en Word, donde no
+// existe un equivalente directo a las páginas horizontales del PDF.
+function renderGanttImage(projectList){
+  const gdata = buildGanttData(projectList);
+  if (!gdata) return null;
+  const { ganttRows, minDate, maxDate, today } = gdata;
+  const spanMs = Math.max(1, maxDate - minDate);
+  const monthNames = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+
+  const scale = 2; // más resolución para que el PNG se vea nítido en el Word.
+  const gMarginX = 20, labelColW = 190, rowH = 20, topOffset = 118, bottomPad = 14;
+  const cw = 1180, ch = topOffset + ganttRows.length*rowH + bottomPad;
+  const timelineLeft = gMarginX + labelColW, timelineRight = cw - gMarginX;
+  const xOf = (d) => timelineLeft + ((d - minDate) / spanMs) * (timelineRight - timelineLeft);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = cw*scale; canvas.height = ch*scale;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(scale, scale);
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,cw,ch);
+
+  // Encabezado
+  ctx.fillStyle = '#141414'; ctx.fillRect(0,0,cw,46);
+  ctx.fillStyle = '#ffffff'; ctx.font = 'bold 13px Helvetica, Arial, sans-serif';
+  ctx.fillText('Diagrama de Gantt — proyección por fechas de estado', gMarginX, 22);
+  ctx.font = '9px Helvetica, Arial, sans-serif';
+  ctx.fillText('Syntesys Tecnológica S.A.S — Estado General de Proyectos DC', gMarginX, 37);
+
+  // Leyenda de las 4 etapas, en su propia franja debajo del encabezado
+  // oscuro (separada del eje de meses de más abajo por bastante margen,
+  // para que ningún texto quede encima de otro).
+  let lx = gMarginX, ly = 64;
+  ctx.font = '9px Helvetica, Arial, sans-serif';
+  GANTT_STAGES.forEach(s => {
+    ctx.fillStyle = `rgb(${s.color.join(',')})`;
+    ctx.fillRect(lx, ly-9, 10, 10);
+    ctx.strokeStyle = '#b4b4ac'; ctx.strokeRect(lx, ly-9, 10, 10);
+    ctx.fillStyle = '#3c3c3c';
+    ctx.fillText(s.label, lx+14, ly);
+    lx += ctx.measureText(s.label).width + 30;
+  });
+  // Descripción de qué representa cada tramo, en su propia línea.
+  ctx.font = '7.5px Helvetica, Arial, sans-serif';
+  ctx.fillStyle = '#82827a';
+  ctx.fillText(GANTT_CAPTION, gMarginX, 80);
+  ctx.strokeStyle = '#e4e1d6'; ctx.beginPath(); ctx.moveTo(gMarginX, 90); ctx.lineTo(cw-gMarginX, 90); ctx.stroke();
+
+  // Cuadrícula de meses
+  ctx.font = '8px Helvetica, Arial, sans-serif';
+  let cursor = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+  while (cursor <= maxDate){
+    const x = xOf(cursor);
+    if (x >= timelineLeft && x <= timelineRight){
+      ctx.strokeStyle = '#e4e1d6'; ctx.beginPath(); ctx.moveTo(x, topOffset-6); ctx.lineTo(x, ch-bottomPad); ctx.stroke();
+      ctx.fillStyle = '#787878';
+      ctx.fillText(`${monthNames[cursor.getMonth()]} ${cursor.getFullYear()}`, x+2, topOffset-10);
+    }
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth()+1, 1);
+  }
+  if (today >= minDate && today <= maxDate){
+    const xt = xOf(today);
+    ctx.strokeStyle = '#c82828'; ctx.beginPath(); ctx.moveTo(xt, topOffset-6); ctx.lineTo(xt, ch-bottomPad); ctx.stroke();
+    ctx.fillStyle = '#c82828'; ctx.fillText('Hoy', xt+2, topOffset-10);
+  }
+
+  // Filas
+  let y = topOffset;
+  let zebra = false;
+  ganttRows.forEach(row => {
+    if (row.type === 'group'){
+      ctx.fillStyle = '#f6f4ec'; ctx.fillRect(gMarginX, y, cw-2*gMarginX, rowH);
+      ctx.fillStyle = '#141414'; ctx.font = 'bold 9.5px Helvetica, Arial, sans-serif';
+      ctx.fillText(`${row.estado} (${row.count})`, gMarginX+4, y+rowH-6);
+      y += rowH;
+      zebra = false;
+      return;
+    }
+    if (zebra){ ctx.fillStyle = '#faf9f5'; ctx.fillRect(gMarginX, y, cw-2*gMarginX, rowH); }
+    zebra = !zebra;
+    const p = row.p;
+    ctx.font = '8.5px Helvetica, Arial, sans-serif';
+    ctx.fillStyle = '#282828';
+    let label = `${p.cliente||'—'} — ${p.sede||'—'}`;
+    while (ctx.measureText(label).width > labelColW-8 && label.length > 3) label = label.slice(0,-2);
+    if (label !== `${p.cliente||'—'} — ${p.sede||'—'}`) label = label.slice(0,-1)+'…';
+    ctx.fillText(label, gMarginX+4, y+rowH-7);
+
+    let drewAny = false;
+    GANTT_STAGES.forEach(s => {
+      const from = parseDateSafe(p[s.from]), to = parseDateSafe(p[s.to]);
+      if (from && to && to >= from){
+        const x1 = xOf(from), x2 = xOf(to);
+        ctx.fillStyle = `rgb(${s.color.join(',')})`;
+        ctx.fillRect(Math.min(x1,x2), y+3, Math.max(2, Math.abs(x2-x1)), rowH-8);
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.6;
+        ctx.strokeRect(Math.min(x1,x2), y+3, Math.max(2, Math.abs(x2-x1)), rowH-8);
+        drewAny = true;
+      }
+    });
+    if (!drewAny){
+      const inicio = parseDateSafe(p.fInicioObra);
+      if (inicio){
+        ctx.fillStyle = `rgb(${hexToRgb(STATUS_COLORS[p.estado] || '#8c8c86').join(',')})`;
+        ctx.beginPath(); ctx.arc(xOf(inicio), y+rowH/2-2, 3, 0, Math.PI*2); ctx.fill();
+      }
+    }
+    y += rowH;
+  });
+
+  return new Promise(resolve => {
+    canvas.toBlob(blob => resolve(blob ? { blob, width:cw, height:ch } : null), 'image/png');
+  });
+}
+
 function exportMapaPDF(){
   if (typeof window.jspdf === 'undefined'){
     alert('No se pudo cargar la librería de PDF. Revisa tu conexión a internet y actualiza la página.');
@@ -3232,25 +3816,9 @@ function exportMapaPDF(){
   y = doc.lastAutoTable.finalY + 24;
 
   // 2) Un detalle por cada estado, mostrando únicamente la(s) fecha(s) /
-  //    dato(s) que corresponden a esa etapa del proceso:
-  //    - POR INICIAR      → fecha de inicio de obra
-  //    - EN PROCESO        → fecha inicio real de obra + fecha entrega al cliente (inicio garantía)
-  //    - FINALIZADA        → fecha entrega al cliente (inicio garantía)
-  //    - LIQUIDADA         → fecha de liquidación al cliente
-  //    - OC SOLICITADA     → fecha de liquidación al cliente
-  //    - FACTURADA         → N° factura + fecha emisión factura
-  //    - RECAUDADO         → fecha de facturación de recaudo
-  const ESTADO_REPORT_FIELDS = {
-    'POR INICIAR':    [{ key:'fInicioObra',        label:'Fecha de inicio de obra' }],
-    'EN PROCESO':     [{ key:'fInicioObra',        label:'Fecha inicio real de obra' },
-                        { key:'fEntrega',           label:'Fecha entrega al cliente (inicio garantía)' }],
-    'FINALIZADA':     [{ key:'fEntrega',           label:'Fecha entrega al cliente (inicio garantía)' }],
-    'LIQUIDADA':      [{ key:'fLiquidacion',       label:'Fecha de liquidación al cliente' }],
-    'OC SOLICITADA':  [{ key:'fLiquidacion',       label:'Fecha de liquidación al cliente' }],
-    'FACTURADA':      [{ key:'nFactura',           label:'N° factura', text:true },
-                        { key:'fEmisionFactura',    label:'Fecha emisión factura' }],
-    'RECAUDADO':      [{ key:'fFacturacionRecaudo',label:'Fecha de facturación de recaudo' }],
-  };
+  //    dato(s) que corresponden a esa etapa del proceso (ver
+  //    ESTADO_REPORT_FIELDS, definido junto a GANTT_STAGES para que también
+  //    lo use exportMapaDOCX).
   STATUSES.filter(st => ESTADO_REPORT_FIELDS[st]).forEach(st => {
     const campos = ESTADO_REPORT_FIELDS[st];
     const items = projects.filter(p => p.estado === st);
@@ -3272,8 +3840,83 @@ function exportMapaPDF(){
     y = doc.lastAutoTable.finalY + 24;
   });
 
+  // 3) Diagrama de Gantt: una línea de tiempo por proyecto (agrupadas por
+  //    estado) con un tramo de color por cada etapa cuyas dos fechas estén
+  //    registradas — así se ve gráficamente cómo se distribuyen en el
+  //    calendario los mismos estados que ya se listaron arriba en tablas.
+  drawGanttPDF(doc, projects);
+
   doc.save(`Informe_estado_proyectos_${new Date().toISOString().slice(0,10)}.pdf`);
   logChange({ project:'—', text:'Exportó el informe de estado de proyectos (mapa) a PDF.' });
+}
+// Informe de estado en Word (.docx): mismo contenido que exportMapaPDF
+// (cantidad por estado, detalle por estado y el diagrama de Gantt), armado
+// con docx.js. El Gantt se genera como imagen PNG (ver renderGanttImage) y
+// se incrusta al final del documento porque docx.js no dibuja formas
+// sueltas como jsPDF — así ambos formatos muestran la misma información.
+async function exportMapaDOCX(){
+  if (typeof window.docx === 'undefined'){
+    alert('No se pudo cargar la librería de Word. Revisa tu conexión a internet y actualiza la página.');
+    return;
+  }
+  const { Document, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, ShadingType, HeadingLevel, ImageRun, Packer } = window.docx;
+
+  const darkShading = { fill:'141414', type:ShadingType.CLEAR, color:'auto' };
+  const headCell = (text) => new TableCell({ shading:darkShading, children:[ new Paragraph({ children:[ new TextRun({ text, bold:true, color:'F6D500', size:19 }) ] }) ] });
+  const bodyCell = (text) => new TableCell({ children:[ new Paragraph({ children:[ new TextRun({ text:String(text ?? '—'), size:18 }) ] }) ] });
+
+  const children = [
+    new Paragraph({ children:[ new TextRun({ text:'Informe de estado de proyectos', bold:true, size:32 }) ] }),
+    new Paragraph({ children:[ new TextRun({ text:'Syntesys Tecnológica S.A.S — Estado General de Proyectos DC', size:18, color:'5A5A54' }) ] }),
+    new Paragraph({ children:[ new TextRun({ text:`Generado el ${fmtDateTime(new Date().toISOString())}`, size:16, color:'6B6B63' }) ], spacing:{ after:200 } }),
+    new Paragraph({ heading:HeadingLevel.HEADING_1, children:[ new TextRun('Cantidad de proyectos por estado') ] }),
+  ];
+
+  const estadosRows = STATUSES.map(st => [st, String(projects.filter(p=>p.estado===st).length)]);
+  estadosRows.push(['Total', String(projects.length)]);
+  children.push(new Table({
+    width:{ size:100, type:WidthType.PERCENTAGE },
+    rows:[
+      new TableRow({ children:[ headCell('Estado'), headCell('Cantidad de proyectos') ] }),
+      ...estadosRows.map(([a,b]) => new TableRow({ children:[ bodyCell(a), bodyCell(b) ] })),
+    ],
+  }));
+  children.push(new Paragraph({ text:'', spacing:{ after:200 } }));
+
+  STATUSES.filter(st => ESTADO_REPORT_FIELDS[st]).forEach(st => {
+    const campos = ESTADO_REPORT_FIELDS[st];
+    const items = projects.filter(p => p.estado === st);
+    if (!items.length) return; // Sin proyectos en este estado: no se exporta su tabla.
+    children.push(new Paragraph({ heading:HeadingLevel.HEADING_2, children:[ new TextRun(`${st} — ${items.length}`) ] }));
+    children.push(new Table({
+      width:{ size:100, type:WidthType.PERCENTAGE },
+      rows:[
+        new TableRow({ children:[ headCell('Cliente'), headCell('Sede'), headCell('Ciudad'), ...campos.map(c => headCell(c.label)) ] }),
+        ...items.map(p => new TableRow({ children:[
+          bodyCell(p.cliente), bodyCell(p.sede), bodyCell(p.ciudad),
+          ...campos.map(c => bodyCell(c.text ? (p[c.key] || '—') : fmtDate(p[c.key]))),
+        ] })),
+      ],
+    }));
+    children.push(new Paragraph({ text:'', spacing:{ after:200 } }));
+  });
+
+  // Diagrama de Gantt, como imagen.
+  const gantt = await renderGanttImage(projects);
+  if (gantt){
+    children.push(new Paragraph({ heading:HeadingLevel.HEADING_1, children:[ new TextRun('Diagrama de Gantt — proyección por fechas de estado') ] }));
+    const displayWidth = 600;
+    const displayHeight = Math.round(gantt.height * (displayWidth / gantt.width));
+    children.push(new Paragraph({ children:[ new ImageRun({
+      data: await gantt.blob.arrayBuffer(),
+      transformation:{ width:displayWidth, height:displayHeight },
+    }) ] }));
+  }
+
+  const doc = new Document({ sections:[{ properties:{ page:{ size:{ orientation:'landscape' } } }, children }] });
+  const blob = await Packer.toBlob(doc);
+  downloadBlob(blob, `Informe_estado_proyectos_${new Date().toISOString().slice(0,10)}.docx`);
+  logChange({ project:'—', text:'Exportó el informe de estado de proyectos (mapa) a Word.' });
 }
 
 /* ---------- Reporte ejecutivo mensual (Excel multi-hoja) ---------- */
@@ -3432,8 +4075,8 @@ async function silentAutoRefresh(){
     if (currentUser){
       const fresh = users.find(x => x.email.toLowerCase() === currentUser.email.toLowerCase());
       if (fresh){
-        currentUser = { name: fresh.name, email: fresh.email, role: fresh.role || 'user' };
-        if (!canSeeAdminTabs(currentUser.role) && ADMIN_ONLY_TABS.includes(activeTab)) activeTab = 'resumen';
+        currentUser = { name: fresh.name, email: fresh.email, role: fresh.role || 'user', tabAccess: fresh.tabAccess || null };
+        if (!hasTabAccess(currentUser, activeTab)) activeTab = 'resumen';
       } else {
         currentUser = null; authView = 'login';
         await clearSession();

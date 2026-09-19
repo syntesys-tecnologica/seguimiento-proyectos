@@ -14,6 +14,7 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -498,6 +499,28 @@ html[data-theme="dark"] .form-section legend{ color:var(--muted); }
 .tab-access-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px 14px; }
 .tab-access-item{ display:flex !important; align-items:center; gap:8px; font-size:13px; color:var(--ink); cursor:pointer; margin:0; }
 .tab-access-item input{ width:16px; height:16px; accent-color:var(--yellow); flex-shrink:0; cursor:pointer; }
+
+/* Reporte personalizado (pestaña Proyección) */
+.rep-group{ border:1px solid var(--line); border-radius:10px; padding:12px 14px; background:var(--paper); }
+.rep-group-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; margin-bottom:10px; }
+.rep-group-head strong{ font-size:13px; color:var(--ink); }
+.rep-group-actions{ display:flex; gap:6px; flex:none; }
+.rep-mini-btn{ background:none; border:1px solid var(--line); border-radius:999px; padding:3px 10px; font-size:11.5px; color:var(--muted); cursor:pointer; transition:color .15s var(--ease), border-color .15s var(--ease); }
+.rep-mini-btn:hover{ color:var(--ink); border-color:var(--ink); }
+.rep-check-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(155px,1fr)); gap:7px 14px; max-height:168px; overflow-y:auto; padding-right:4px; }
+.rep-check{ display:flex !important; align-items:center; gap:8px; font-size:12.5px; color:var(--ink); cursor:pointer; margin:0; }
+.rep-check input{ width:15px; height:15px; accent-color:var(--yellow); flex:none; cursor:pointer; }
+.rep-count{ font-size:12.5px; color:var(--muted); margin:0; }
+.rep-count strong{ color:var(--ink); }
+.rep-check-dim{ opacity:.42; }
+.rep-check-dim input{ cursor:not-allowed; }
+.rep-check span[data-label]{ transition:opacity .12s var(--ease); }
+.rep-range{ display:grid; grid-template-columns:1.2fr 1fr 1fr; gap:10px; }
+@media (max-width:600px){
+  .rep-range{ grid-template-columns:1fr; }
+  .rep-check-grid{ grid-template-columns:1fr 1fr; max-height:200px; }
+  .rep-group-head{ flex-direction:column; }
+}
 .date-field-row{ display:flex; gap:6px; align-items:center; }
 .date-field-row input[type="date"]{ flex:1; min-width:0; }
 .btn-clear-date{ flex:none; padding:6px 10px; font-size:12px; white-space:nowrap; }
@@ -604,6 +627,7 @@ let loadError = false; // true si la última carga no pudo confirmar los datos g
 let activeTab = 'resumen';
 let filters = { estado: new Set(), contratista:'', ciudad:'', coordinador:'', search:'' };
 let modalState = null; // { id: number|null, draft: {...} }
+let customReportState = null; // pestaña Proyección: modal del reporte personalizado abierto
 let authView = 'login';
 let authError = '';
 let charts = {};
@@ -1445,6 +1469,7 @@ function renderApp(){
         </div>
       </div>
       ${modalState ? renderModal() : ''}
+      ${customReportState ? renderCustomReportModal() : ''}
       ${pendingDeleteId ? renderConfirmDelete() : ''}
       ${trashPanelOpen ? renderTrashPanel() : ''}
       ${pendingPurgeId ? renderConfirmPurgeItem() : ''}
@@ -1769,6 +1794,7 @@ function renderProyeccion(){
         <div class="toolbar-right">
           <button class="btn btn-outline" data-action="export-mapa-pdf">Descargar informe de estado (PDF)</button>
           <button class="btn btn-outline" data-action="export-mapa-docx">Descargar informe de estado (Word)</button>
+          <button class="btn btn-primary" data-action="open-custom-report">Reporte personalizado</button>
         </div>
       </div>
 
@@ -1935,10 +1961,11 @@ function renderAnalisis(){
       <div class="toolbar">
         <div>
           <h3 class="chart-title" style="margin-bottom:2px">Reporte ejecutivo mensual</h3>
-          <p class="auth-note">Descarga en un solo archivo de Excel el resumen por estado, el comparativo semanal, proyectos por ciudad y contratista, y los tiempos promedio entre etapas — listo para enviar o archivar.</p>
+          <p class="auth-note">Descarga el informe completo para gerencia —resumen ejecutivo, comparativo semanal, estado de los proyectos, tiempos entre etapas, ciudades y contratistas— con los mismos gráficos de esta pestaña incluidos. En Excel quedan además las tablas de datos editables; en PDF, un documento listo para presentar o enviar.</p>
         </div>
         <div class="toolbar-right">
           <button class="btn btn-outline" data-action="export-monthly-report">Descargar reporte mensual (Excel)</button>
+          <button class="btn btn-primary" data-action="export-monthly-report-pdf">Descargar reporte mensual (PDF)</button>
         </div>
       </div>
 
@@ -2758,6 +2785,9 @@ function buildCharts(){
 
 /* ---------- Ciclo tras render ---------- */
 function afterAppRender(){
+  // Los conteos y el cruce de filtros del reporte personalizado se calculan
+  // apenas se abre el modal, sin esperar a que la persona toque una casilla.
+  if (customReportState) crUpdateCascade();
   if (activeTab === 'resumen' || activeTab === 'analisis'){
     requestAnimationFrame(buildCharts);
   }
@@ -2779,7 +2809,7 @@ root.addEventListener('change', onRootChange);
 root.addEventListener('input', onRootInput);
 
 function onRootClick(e){
-  const overlay = e.target.closest('[data-action="close-modal-overlay"], [data-action="cancel-delete"], [data-action="close-user-modal-overlay"], [data-action="cancel-delete-user"], [data-action="cancel-archive-audit"], [data-action="close-trash-overlay"], [data-action="cancel-purge-item"], [data-action="cancel-empty-trash"], [data-action="close-notifications"]');
+  const overlay = e.target.closest('[data-action="close-modal-overlay"], [data-action="cancel-delete"], [data-action="close-user-modal-overlay"], [data-action="cancel-delete-user"], [data-action="cancel-archive-audit"], [data-action="close-trash-overlay"], [data-action="cancel-purge-item"], [data-action="cancel-empty-trash"], [data-action="close-notifications"], [data-action="close-custom-report-overlay"]');
   if (overlay && !e.target.closest('[data-stop-close]')){
     const a = overlay.dataset.action;
     if (a === 'close-modal-overlay'){ modalState = null; }
@@ -2791,6 +2821,7 @@ function onRootClick(e){
     else if (a === 'cancel-purge-item'){ pendingPurgeId = null; }
     else if (a === 'cancel-empty-trash'){ pendingEmptyTrash = false; }
     else if (a === 'close-notifications'){ notifOpen = false; }
+    else if (a === 'close-custom-report-overlay'){ customReportState = null; }
     render();
     return;
   }
@@ -2828,6 +2859,23 @@ function onRootClick(e){
       userModalState = { mode:'self', email: currentUser.email, draft:{} };
       render(); break;
     case 'export-monthly-report': exportMonthlyReport(); break;
+    case 'export-monthly-report-pdf': exportMonthlyReportPDF(); break;
+    case 'open-custom-report': customReportState = {}; render(); break;
+    case 'close-custom-report': customReportState = null; render(); break;
+    case 'cr-toggle-all': {
+      // "Todos" / "Ninguno" de cada bloque de casillas del reporte personalizado.
+      const form = document.getElementById('customReportForm');
+      if (form){
+        const checked = btn.dataset.value === 'all';
+        form.querySelectorAll(`input[type="checkbox"][name="${btn.dataset.group}"]`).forEach(cb => {
+          // No se marcan las opciones que ya están en 0 (no aportarían nada
+          // con los demás filtros activos); la cascada las deja fuera igual.
+          if (!(checked && cb.disabled)) cb.checked = checked;
+        });
+        crUpdateCascade();
+      }
+      break;
+    }
     case 'export-project-pdf': {
       const p = projects.find(x=>x.id===Number(btn.dataset.id));
       if (p) exportProjectPDF(p);
@@ -2933,6 +2981,10 @@ function onRootClick(e){
 }
 
 function onRootChange(e){
+  if (e.target.closest('#customReportForm')){
+    crUpdateCascade();
+    return;
+  }
   if (e.target.matches('[data-mapa-horizonte]')){
     mapaHorizonteDias = Number(e.target.value) || 15;
     render();
@@ -2946,6 +2998,10 @@ function onRootChange(e){
 }
 
 function onRootInput(e){
+  if (e.target.closest('#customReportForm')){
+    crUpdateCascade();
+    return;
+  }
   if (e.target.matches('[name="fInicioObra"], [name="fEntrega"]') && e.target.closest('#projectForm')){
     // El tiempo de ejecución se recalcula solo cada vez que cambia la fecha
     // de inicio real de obra o la fecha de entrega al cliente.
@@ -3002,6 +3058,10 @@ function onRootSubmit(e){
   // y SIEMPRE se llama a preventDefault() antes de cualquier salida — de lo contrario
   // el navegador llega a enviar el formulario de forma nativa (recarga la página) y
   // se pierde toda la sesión en memoria, lo que se sentía como un "deslogueo" al guardar.
+  if (e.target && e.target.id === 'customReportForm'){
+    e.preventDefault();
+    return exportCustomReportPDF();
+  }
   if (e.target && e.target.id === 'projectForm'){
     e.preventDefault();
     return saveProject(e.target);
@@ -3448,18 +3508,34 @@ function hexToRgb(hex){
   const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || '');
   return m ? [parseInt(m[1],16), parseInt(m[2],16), parseInt(m[3],16)] : [140,140,134];
 }
-// Las 4 etapas que se dibujan como tramos del Gantt, cada una delimitada
-// por dos fechas ya existentes del proyecto. Los colores se toman de los
-// mismos STATUS_COLORS que usa el resto de la app, para que el tramo de
-// "Facturación", por ejemplo, se vea del mismo morado que el estado
-// FACTURADA en cualquier otra pantalla.
-const GANTT_STAGES = [
-  { label:'Ejecución de obra',  full:'Ejecución de obra (inicio de obra → entrega)',            from:'fInicioObra',     to:'fEntrega',            color:hexToRgb(STATUS_COLORS['EN PROCESO']) },
-  { label:'Entrega / garantía', full:'Entrega / garantía (entrega → liquidación)',               from:'fEntrega',        to:'fLiquidacion',        color:hexToRgb(STATUS_COLORS['LIQUIDADA']) },
-  { label:'Facturación',        full:'Facturación (liquidación → emisión de factura)',           from:'fLiquidacion',    to:'fEmisionFactura',     color:hexToRgb(STATUS_COLORS['FACTURADA']) },
-  { label:'Recaudo',            full:'Recaudo (emisión de factura → facturación de recaudo)',    from:'fEmisionFactura', to:'fFacturacionRecaudo', color:hexToRgb(STATUS_COLORS['RECAUDADO']) },
+// Fases que se dibujan como tramos del Gantt. Cada tramo se pinta con el
+// color del ESTADO en el que está el proyecto durante ese período (los mismos
+// STATUS_COLORS que usa el resto de la app) y va desde la fecha en que el
+// proyecto ENTRA a ese estado hasta la fecha en que entra al siguiente — la
+// misma convención de ESTADO_REPORT_FIELDS, más abajo:
+//    EN PROCESO      inicio real de obra      → entrega al cliente
+//    FINALIZADA      entrega al cliente       → liquidación al cliente
+//    OC SOLICITADA   liquidación al cliente   → emisión de factura
+//                    (si el proyecto está hoy en LIQUIDADA, ver ganttSegments)
+//    FACTURADA       emisión de factura       → facturación de recaudo
+//    RECAUDADO       facturación de recaudo   → hito final (rombo, sin duración)
+const GANTT_PHASES = [
+  { key:'proceso',    estado:'EN PROCESO',    from:'fInicioObra',     to:'fEntrega' },
+  { key:'finalizada', estado:'FINALIZADA',    from:'fEntrega',        to:'fLiquidacion' },
+  { key:'oc',         estado:'OC SOLICITADA', from:'fLiquidacion',    to:'fEmisionFactura' },
+  { key:'facturada',  estado:'FACTURADA',     from:'fEmisionFactura', to:'fFacturacionRecaudo' },
 ];
-const GANTT_CAPTION = 'Cada tramo cubre el período entre dos fechas del proyecto: inicio de obra → entrega → liquidación → emisión de factura → facturación de recaudo.';
+// Estados que aparecen en la leyenda del Gantt (los que se dibujan como barra
+// o como rombo). POR INICIAR y EN DISEÑO no tienen tramo propio: cuando un
+// proyecto solo tiene fecha de inicio se marca con un punto del color de su estado.
+const GANTT_LEGEND_ESTADOS = ['EN PROCESO','FINALIZADA','LIQUIDADA','OC SOLICITADA','FACTURADA','RECAUDADO'];
+const GANTT_CAPTION_LINES = [
+  'Cada color es el estado del proyecto durante ese período: EN PROCESO (de inicio de obra a entrega) · FINALIZADA (de entrega a liquidación).',
+  'OC SOLICITADA (de liquidación a emisión de factura; LIQUIDADA si hoy el proyecto está en ese estado) · FACTURADA (de emisión de factura a facturación de recaudo).',
+  'El rombo marca la fecha de recaudo y la barra del estado actual se extiende hasta la línea de "Hoy".',
+];
+// Color [r,g,b] de un estado, idéntico al que se usa en chips, mapa y gráficos.
+function ganttColor(estado){ return hexToRgb(STATUS_COLORS[estado] || '#8c8c86'); }
 // Qué fecha(s) / dato(s) se muestran en la tabla de detalle de cada estado
 // del informe de estado (Proyección), tanto en PDF como en Word:
 //    - POR INICIAR      → fecha de inicio de obra
@@ -3480,20 +3556,54 @@ const ESTADO_REPORT_FIELDS = {
                       { key:'fEmisionFactura',    label:'Fecha emisión factura' }],
   'RECAUDADO':      [{ key:'fFacturacionRecaudo',label:'Fecha de facturación de recaudo' }],
 };
+// Calcula los tramos que se dibujan para un proyecto:
+//  - una barra por cada fase (ver GANTT_PHASES) cuyas dos fechas estén
+//    registradas y en orden, con el color del estado de esa fase;
+//  - si la fase es la del estado ACTUAL del proyecto y todavía no tiene fecha
+//    de cierre, la barra se extiende hasta hoy (open:true), para que el
+//    estado en que está hoy el proyecto también se vea con su color;
+//  - un rombo de color RECAUDADO en la fecha de facturación de recaudo.
+// No existe una fecha propia para "OC solicitada", así que LIQUIDADA y OC
+// SOLICITADA comparten el tramo que arranca en la fecha de liquidación: se
+// pinta LIQUIDADA solo si el proyecto está hoy en LIQUIDADA; en cualquier
+// otro caso (OC SOLICITADA, o proyectos que ya pasaron a facturar/recaudar)
+// se pinta OC SOLICITADA.
+function ganttSegments(p, today){
+  const segs = [];
+  GANTT_PHASES.forEach(ph => {
+    const from = parseDateSafe(p[ph.from]);
+    if (!from) return;
+    const estado = (ph.key === 'oc' && p.estado === 'LIQUIDADA') ? 'LIQUIDADA' : ph.estado;
+    let to = parseDateSafe(p[ph.to]);
+    let open = false;
+    if (!to){
+      if (estado === p.estado && from <= today){ to = today; open = true; }
+      else return; // fase sin fecha de cierre y que no es la actual: no hay tramo que dibujar
+    }
+    if (to < from) return; // fechas invertidas: se omite en vez de dibujar una barra al revés
+    segs.push({ kind:'bar', from, to, estado, open });
+  });
+  const recaudo = parseDateSafe(p.fFacturacionRecaudo);
+  if (recaudo) segs.push({ kind:'milestone', at:recaudo, estado:'RECAUDADO' });
+  return segs;
+}
 // Construye la estructura de filas y el rango de fechas del Gantt a partir
 // de la lista de proyectos. La comparten drawGanttPDF (dibuja con jsPDF) y
 // renderGanttImage (dibuja en un <canvas> para incrustar como imagen en el
 // Word), así ambos formatos muestran exactamente la misma información.
 function buildGanttData(projectList){
+  const today = new Date(); today.setHours(0,0,0,0);
+  const far = new Date(8640000000000000);
   const ganttRows = [];
   STATUSES.forEach(st => {
     const items = projectList
       .filter(p => p.estado === st)
-      .filter(p => GANTT_STAGES.some(s => parseDateSafe(p[s.from]) && parseDateSafe(p[s.to])) || parseDateSafe(p.fInicioObra))
-      .sort((a,b) => (parseDateSafe(a.fInicioObra) || new Date(8640000000000000)) - (parseDateSafe(b.fInicioObra) || new Date(8640000000000000)));
+      .map(p => ({ p, segs: ganttSegments(p, today) }))
+      .filter(it => it.segs.length || parseDateSafe(it.p.fInicioObra))
+      .sort((a,b) => (parseDateSafe(a.p.fInicioObra) || far) - (parseDateSafe(b.p.fInicioObra) || far));
     if (!items.length) return;
     ganttRows.push({ type:'group', estado:st, count:items.length });
-    items.forEach(p => ganttRows.push({ type:'project', p }));
+    items.forEach(it => ganttRows.push({ type:'project', p:it.p, segs:it.segs }));
   });
   if (!ganttRows.length) return null; // Ningún proyecto tiene fechas suficientes para graficar.
 
@@ -3506,21 +3616,23 @@ function buildGanttData(projectList){
   };
   ganttRows.forEach(r => {
     if (r.type !== 'project') return;
-    GANTT_STAGES.forEach(s => { trackDate(r.p[s.from]); trackDate(r.p[s.to]); });
+    r.segs.forEach(s => {
+      if (s.kind === 'bar'){ trackDate(s.from); trackDate(s.to); }
+      else trackDate(s.at);
+    });
     trackDate(r.p.fInicioObra);
   });
   if (!minDate || !maxDate) return null;
   minDate = new Date(minDate); minDate.setDate(minDate.getDate()-5);
   maxDate = new Date(maxDate); maxDate.setDate(maxDate.getDate()+5);
-  const today = new Date(); today.setHours(0,0,0,0);
   return { ganttRows, minDate, maxDate, today };
 }
 // Dibuja el diagrama de Gantt en páginas horizontales nuevas al final del
 // documento `doc`: una fila por proyecto, agrupadas por estado, con un
-// tramo de color por cada etapa cuyas dos fechas estén registradas. Si un
-// proyecto solo tiene la fecha de inicio de obra (aún no hay tramo real,
-// por ejemplo un "POR INICIAR" recién programado), se marca con un punto
-// en esa fecha en vez de una barra.
+// tramo por cada fase registrada, del color del estado que representa (ver
+// ganttSegments). Si un proyecto solo tiene la fecha de inicio de obra (aún
+// no hay tramo real, por ejemplo un "POR INICIAR" recién programado), se
+// marca con un punto del color de su estado en vez de una barra.
 function drawGanttPDF(doc, projectList){
   const gdata = buildGanttData(projectList);
   if (!gdata) return;
@@ -3528,9 +3640,15 @@ function drawGanttPDF(doc, projectList){
   const spanMs = Math.max(1, maxDate - minDate);
   const monthNames = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
 
-  const gMarginX = 40, labelColW = 190, rowH = 16, topOffset = 132, bottomMargin = 36;
+  const gMarginX = 40, labelColW = 190, rowH = 16, topOffset = 142, bottomMargin = 36;
   let pw, ph, timelineLeft, timelineRight;
   const xOf = (d) => timelineLeft + ((d - minDate) / spanMs) * (timelineRight - timelineLeft);
+  // Rombo (hito de recaudo) centrado en (cx,cy) con "radio" r.
+  const pdfDiamond = (cx, cy, r, rgb, stroke) => {
+    doc.setFillColor(...rgb);
+    doc.setDrawColor(...stroke);
+    doc.lines([[r, r], [-r, r], [-r, -r]], cx, cy - r, [1,1], 'FD', true);
+  };
 
   function drawGanttHeader(pageNum){
     pw = doc.internal.pageSize.getWidth();
@@ -3550,28 +3668,34 @@ function drawGanttPDF(doc, projectList){
     doc.setFontSize(9);
     doc.text(`Generado el ${fmtDateTime(new Date().toISOString())}${pageNum>1 ? ` · continuación (página ${pageNum} del diagrama)` : ''}`, gMarginX, 62);
 
-    // Leyenda de las 4 etapas, en su propia franja debajo del encabezado
-    // oscuro (con margen de sobra respecto al eje de meses de más abajo,
-    // para que ningún texto quede pisado por otro).
+    // Leyenda: un cuadro (o rombo, para RECAUDADO) por cada estado, con el
+    // mismo color que ese estado tiene en el resto de la app. Va en su propia
+    // franja debajo del encabezado oscuro, con margen de sobra respecto al
+    // eje de meses de más abajo, para que ningún texto quede pisado.
     let lx = gMarginX;
     const ly = 90;
     doc.setFontSize(9);
-    GANTT_STAGES.forEach(s => {
-      doc.setFillColor(...s.color);
-      doc.rect(lx, ly-8, 10, 10, 'F');
-      doc.setDrawColor(180,180,172);
-      doc.rect(lx, ly-8, 10, 10, 'S');
+    GANTT_LEGEND_ESTADOS.forEach(est => {
+      const col = ganttColor(est);
+      if (est === 'RECAUDADO'){
+        pdfDiamond(lx+5, ly-3, 5.5, col, [180,180,172]);
+      } else {
+        doc.setFillColor(...col);
+        doc.rect(lx, ly-8, 10, 10, 'F');
+        doc.setDrawColor(180,180,172);
+        doc.rect(lx, ly-8, 10, 10, 'S');
+      }
       doc.setTextColor(60,60,60);
       doc.setFont('helvetica','normal');
-      doc.text(s.label, lx+14, ly);
-      lx += doc.getTextWidth(s.label) + 34;
+      doc.text(est, lx+14, ly);
+      lx += doc.getTextWidth(est) + 34;
     });
-    // Descripción de qué representa cada tramo, en una línea aparte.
+    // Descripción de qué representa cada color, en líneas aparte.
     doc.setFontSize(7.5);
     doc.setTextColor(130,130,122);
-    doc.text(GANTT_CAPTION, gMarginX, 106);
+    GANTT_CAPTION_LINES.forEach((ln, i) => doc.text(ln, gMarginX, 102 + i*9));
     doc.setDrawColor(228,225,214);
-    doc.line(gMarginX, 116, pw-gMarginX, 116);
+    doc.line(gMarginX, 126, pw-gMarginX, 126);
 
     // Cuadrícula de meses y línea de "Hoy".
     doc.setFontSize(8);
@@ -3592,7 +3716,9 @@ function drawGanttPDF(doc, projectList){
       doc.line(xt, topOffset-6, xt, ph-bottomMargin);
       doc.setTextColor(200,40,40);
       doc.setFontSize(8);
-      doc.text('Hoy', xt+2, topOffset-10);
+      // La etiqueta va al pie de la línea: arriba se encimaba con el rótulo
+      // del mes en curso (p. ej. "sep 2026") cuando "hoy" cae cerca de él.
+      doc.text('Hoy', xt+2, ph-bottomMargin+10);
     }
   }
 
@@ -3615,10 +3741,13 @@ function drawGanttPDF(doc, projectList){
     if (row.type === 'group'){
       doc.setFillColor(246,244,236);
       doc.rect(gMarginX, rowTop, pw-2*gMarginX, rowH, 'F');
+      // Cuadro con el color del estado del grupo, para reconocerlo de un vistazo.
+      doc.setFillColor(...ganttColor(row.estado));
+      doc.rect(gMarginX+4, rowTop+rowH-12, 8, 8, 'F');
       doc.setTextColor(20,20,20);
       doc.setFont('helvetica','bold');
       doc.setFontSize(9.5);
-      doc.text(`${row.estado} (${row.count})`, gMarginX+4, rowTop+rowH-5);
+      doc.text(`${row.estado} (${row.count})`, gMarginX+16, rowTop+rowH-5);
       y += rowH;
       zebra = false;
       return;
@@ -3636,20 +3765,22 @@ function drawGanttPDF(doc, projectList){
     doc.text(doc.splitTextToSize(label, labelColW-8)[0], gMarginX+4, rowTop+rowH-5);
 
     let drewAny = false;
-    GANTT_STAGES.forEach(s => {
-      const from = parseDateSafe(p[s.from]), to = parseDateSafe(p[s.to]);
-      if (from && to && to >= from){
-        const x1 = xOf(from), x2 = xOf(to);
-        doc.setFillColor(...s.color);
+    row.segs.forEach(seg => {
+      const col = ganttColor(seg.estado);
+      if (seg.kind === 'bar'){
+        const x1 = xOf(seg.from), x2 = xOf(seg.to);
+        doc.setFillColor(...col);
         doc.setDrawColor(255,255,255);
-        doc.rect(Math.min(x1,x2), rowTop+3, Math.max(2, Math.abs(x2-x1)), rowH-7, 'FD');
-        drewAny = true;
+        doc.rect(x1, rowTop+3, Math.max(2, x2-x1), rowH-7, 'FD');
+      } else {
+        pdfDiamond(xOf(seg.at), rowTop+3+(rowH-7)/2, 4.5, col, [255,255,255]);
       }
+      drewAny = true;
     });
     if (!drewAny){
       const inicio = parseDateSafe(p.fInicioObra);
       if (inicio){
-        doc.setFillColor(...hexToRgb(STATUS_COLORS[p.estado] || '#8c8c86'));
+        doc.setFillColor(...ganttColor(p.estado));
         doc.circle(xOf(inicio), rowTop+rowH/2, 3, 'F');
       }
     }
@@ -3668,16 +3799,25 @@ function renderGanttImage(projectList){
   const monthNames = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
 
   const scale = 2; // más resolución para que el PNG se vea nítido en el Word.
-  const gMarginX = 20, labelColW = 190, rowH = 20, topOffset = 118, bottomPad = 14;
+  const gMarginX = 20, labelColW = 190, rowH = 20, topOffset = 128, bottomPad = 14;
   const cw = 1180, ch = topOffset + ganttRows.length*rowH + bottomPad;
   const timelineLeft = gMarginX + labelColW, timelineRight = cw - gMarginX;
   const xOf = (d) => timelineLeft + ((d - minDate) / spanMs) * (timelineRight - timelineLeft);
+  const rgbStr = (rgb) => `rgb(${rgb.join(',')})`;
 
   const canvas = document.createElement('canvas');
   canvas.width = cw*scale; canvas.height = ch*scale;
   const ctx = canvas.getContext('2d');
   ctx.scale(scale, scale);
   ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,cw,ch);
+  // Rombo (hito de recaudo) centrado en (cx,cy) con "radio" r.
+  const cvDiamond = (cx, cy, r, fill, stroke) => {
+    ctx.beginPath();
+    ctx.moveTo(cx, cy-r); ctx.lineTo(cx+r, cy); ctx.lineTo(cx, cy+r); ctx.lineTo(cx-r, cy);
+    ctx.closePath();
+    ctx.fillStyle = fill; ctx.fill();
+    ctx.strokeStyle = stroke; ctx.lineWidth = 0.6; ctx.stroke();
+  };
 
   // Encabezado
   ctx.fillStyle = '#141414'; ctx.fillRect(0,0,cw,46);
@@ -3686,24 +3826,31 @@ function renderGanttImage(projectList){
   ctx.font = '9px Helvetica, Arial, sans-serif';
   ctx.fillText('Syntesys Tecnológica S.A.S — Estado General de Proyectos DC', gMarginX, 37);
 
-  // Leyenda de las 4 etapas, en su propia franja debajo del encabezado
-  // oscuro (separada del eje de meses de más abajo por bastante margen,
-  // para que ningún texto quede encima de otro).
+  // Leyenda: un cuadro (o rombo, para RECAUDADO) por cada estado, con el
+  // mismo color que ese estado tiene en el resto de la app. Va en su propia
+  // franja debajo del encabezado oscuro (separada del eje de meses de más
+  // abajo por bastante margen, para que ningún texto quede encima de otro).
   let lx = gMarginX, ly = 64;
   ctx.font = '9px Helvetica, Arial, sans-serif';
-  GANTT_STAGES.forEach(s => {
-    ctx.fillStyle = `rgb(${s.color.join(',')})`;
-    ctx.fillRect(lx, ly-9, 10, 10);
-    ctx.strokeStyle = '#b4b4ac'; ctx.strokeRect(lx, ly-9, 10, 10);
+  GANTT_LEGEND_ESTADOS.forEach(est => {
+    const col = rgbStr(ganttColor(est));
+    if (est === 'RECAUDADO'){
+      cvDiamond(lx+5, ly-4, 5.5, col, '#b4b4ac');
+    } else {
+      ctx.fillStyle = col;
+      ctx.fillRect(lx, ly-9, 10, 10);
+      ctx.strokeStyle = '#b4b4ac'; ctx.lineWidth = 1; ctx.strokeRect(lx, ly-9, 10, 10);
+    }
     ctx.fillStyle = '#3c3c3c';
-    ctx.fillText(s.label, lx+14, ly);
-    lx += ctx.measureText(s.label).width + 30;
+    ctx.fillText(est, lx+14, ly);
+    lx += ctx.measureText(est).width + 30;
   });
-  // Descripción de qué representa cada tramo, en su propia línea.
+  // Descripción de qué representa cada color, en líneas aparte.
   ctx.font = '7.5px Helvetica, Arial, sans-serif';
   ctx.fillStyle = '#82827a';
-  ctx.fillText(GANTT_CAPTION, gMarginX, 80);
-  ctx.strokeStyle = '#e4e1d6'; ctx.beginPath(); ctx.moveTo(gMarginX, 90); ctx.lineTo(cw-gMarginX, 90); ctx.stroke();
+  GANTT_CAPTION_LINES.forEach((ln, i) => ctx.fillText(ln, gMarginX, 78 + i*9));
+  ctx.strokeStyle = '#e4e1d6'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(gMarginX, 101); ctx.lineTo(cw-gMarginX, 101); ctx.stroke();
 
   // Cuadrícula de meses
   ctx.font = '8px Helvetica, Arial, sans-serif';
@@ -3711,7 +3858,7 @@ function renderGanttImage(projectList){
   while (cursor <= maxDate){
     const x = xOf(cursor);
     if (x >= timelineLeft && x <= timelineRight){
-      ctx.strokeStyle = '#e4e1d6'; ctx.beginPath(); ctx.moveTo(x, topOffset-6); ctx.lineTo(x, ch-bottomPad); ctx.stroke();
+      ctx.strokeStyle = '#e4e1d6'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, topOffset-6); ctx.lineTo(x, ch-bottomPad); ctx.stroke();
       ctx.fillStyle = '#787878';
       ctx.fillText(`${monthNames[cursor.getMonth()]} ${cursor.getFullYear()}`, x+2, topOffset-10);
     }
@@ -3719,8 +3866,8 @@ function renderGanttImage(projectList){
   }
   if (today >= minDate && today <= maxDate){
     const xt = xOf(today);
-    ctx.strokeStyle = '#c82828'; ctx.beginPath(); ctx.moveTo(xt, topOffset-6); ctx.lineTo(xt, ch-bottomPad); ctx.stroke();
-    ctx.fillStyle = '#c82828'; ctx.fillText('Hoy', xt+2, topOffset-10);
+    ctx.strokeStyle = '#c82828'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(xt, topOffset-6); ctx.lineTo(xt, ch-bottomPad); ctx.stroke();
+    ctx.fillStyle = '#c82828'; ctx.font = '8px Helvetica, Arial, sans-serif'; ctx.fillText('Hoy', xt+2, ch-4); // al pie: arriba se encimaba con el rótulo del mes
   }
 
   // Filas
@@ -3729,8 +3876,10 @@ function renderGanttImage(projectList){
   ganttRows.forEach(row => {
     if (row.type === 'group'){
       ctx.fillStyle = '#f6f4ec'; ctx.fillRect(gMarginX, y, cw-2*gMarginX, rowH);
+      // Cuadro con el color del estado del grupo, para reconocerlo de un vistazo.
+      ctx.fillStyle = rgbStr(ganttColor(row.estado)); ctx.fillRect(gMarginX+4, y+5, 9, 9);
       ctx.fillStyle = '#141414'; ctx.font = 'bold 9.5px Helvetica, Arial, sans-serif';
-      ctx.fillText(`${row.estado} (${row.count})`, gMarginX+4, y+rowH-6);
+      ctx.fillText(`${row.estado} (${row.count})`, gMarginX+18, y+rowH-6);
       y += rowH;
       zebra = false;
       return;
@@ -3746,21 +3895,24 @@ function renderGanttImage(projectList){
     ctx.fillText(label, gMarginX+4, y+rowH-7);
 
     let drewAny = false;
-    GANTT_STAGES.forEach(s => {
-      const from = parseDateSafe(p[s.from]), to = parseDateSafe(p[s.to]);
-      if (from && to && to >= from){
-        const x1 = xOf(from), x2 = xOf(to);
-        ctx.fillStyle = `rgb(${s.color.join(',')})`;
-        ctx.fillRect(Math.min(x1,x2), y+3, Math.max(2, Math.abs(x2-x1)), rowH-8);
+    row.segs.forEach(seg => {
+      const col = rgbStr(ganttColor(seg.estado));
+      if (seg.kind === 'bar'){
+        const x1 = xOf(seg.from), x2 = xOf(seg.to);
+        const w = Math.max(2, x2-x1);
+        ctx.fillStyle = col;
+        ctx.fillRect(x1, y+3, w, rowH-8);
         ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.6;
-        ctx.strokeRect(Math.min(x1,x2), y+3, Math.max(2, Math.abs(x2-x1)), rowH-8);
-        drewAny = true;
+        ctx.strokeRect(x1, y+3, w, rowH-8);
+      } else {
+        cvDiamond(xOf(seg.at), y+3+(rowH-8)/2, 5, col, '#ffffff');
       }
+      drewAny = true;
     });
     if (!drewAny){
       const inicio = parseDateSafe(p.fInicioObra);
       if (inicio){
-        ctx.fillStyle = `rgb(${hexToRgb(STATUS_COLORS[p.estado] || '#8c8c86').join(',')})`;
+        ctx.fillStyle = rgbStr(ganttColor(p.estado));
         ctx.beginPath(); ctx.arc(xOf(inicio), y+rowH/2-2, 3, 0, Math.PI*2); ctx.fill();
       }
     }
@@ -3817,7 +3969,7 @@ function exportMapaPDF(){
 
   // 2) Un detalle por cada estado, mostrando únicamente la(s) fecha(s) /
   //    dato(s) que corresponden a esa etapa del proceso (ver
-  //    ESTADO_REPORT_FIELDS, definido junto a GANTT_STAGES para que también
+  //    ESTADO_REPORT_FIELDS, definido junto a GANTT_PHASES para que también
   //    lo use exportMapaDOCX).
   STATUSES.filter(st => ESTADO_REPORT_FIELDS[st]).forEach(st => {
     const campos = ESTADO_REPORT_FIELDS[st];
@@ -3905,7 +4057,7 @@ async function exportMapaDOCX(){
   const gantt = await renderGanttImage(projects);
   if (gantt){
     children.push(new Paragraph({ heading:HeadingLevel.HEADING_1, children:[ new TextRun('Diagrama de Gantt — proyección por fechas de estado') ] }));
-    const displayWidth = 600;
+    const displayWidth = 860; // página horizontal: cabe completo y el texto del Gantt se lee
     const displayHeight = Math.round(gantt.height * (displayWidth / gantt.width));
     children.push(new Paragraph({ children:[ new ImageRun({
       data: await gantt.blob.arrayBuffer(),
@@ -3919,59 +4071,1653 @@ async function exportMapaDOCX(){
   logChange({ project:'—', text:'Exportó el informe de estado de proyectos (mapa) a Word.' });
 }
 
-/* ---------- Reporte ejecutivo mensual (Excel multi-hoja) ---------- */
-function exportMonthlyReport(){
-  const wb = XLSX.utils.book_new();
+/* =========================================================
+   REPORTE EJECUTIVO MENSUAL
+   ---------------------------------------------------------
+   Un mismo conjunto de datos alimenta dos entregables listos
+   para presentar ante gerencia:
+     · Excel (.xlsx) con hojas formateadas + los mismos
+       gráficos de la pestaña Análisis incrustados como imagen.
+     · PDF ejecutivo con portada, indicadores, gráficos y
+       tablas, en los colores corporativos (negro / amarillo).
+   Los gráficos se dibujan aparte, fuera de pantalla, con un
+   estilo pensado para papel (fondo blanco, etiquetas con el
+   valor visible), así el archivo se ve igual aunque el usuario
+   tenga la aplicación en modo oscuro o esté en otra pestaña.
+   ========================================================= */
 
-  const resumenRows = STATUSES.map(st => ({ Estado: st, Proyectos: projects.filter(p=>p.estado===st).length }));
-  resumenRows.push({ Estado: 'TOTAL', Proyectos: projects.length });
-  const wsResumen = XLSX.utils.json_to_sheet(resumenRows);
-  wsResumen['!cols'] = [{ wch:20 },{ wch:12 }];
-  XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen por estado');
+const REPORT_BRAND = {
+  black:   '#141414',
+  charcoal:'#2B2B28',
+  yellow:  '#F6D500',
+  ink:     '#141414',
+  muted:   '#5A5A54',
+  grid:    '#E7E4DC',
+  line:    '#D8D5CC',
+  soft:    '#FAF9F5',
+  white:   '#FFFFFF',
+  accent:  '#7A5FC0',
+};
+const REPORT_FONT = 'Inter, Helvetica, Arial, sans-serif';
+function hexToRgb(hex){
+  return [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)];
+}
+function xlColor(hex){ return { argb:'FF' + hex.replace('#','').toUpperCase() }; }
 
+/* ---------- Datos que comparten el Excel y el PDF ---------- */
+function buildMonthlyReportData(){
   const WEEKS_BACK = 8;
   const buckets = buildWeeklyBuckets(WEEKS_BACK);
   const facturadas = countByWeek('fEmisionFactura', buckets);
   const ocRecibida = countByWeek('fRecepcionOC', buckets);
   const recaudadas = countByWeek('fFacturacionRecaudo', buckets);
-  const semanalRows = buckets.map((b,i) => ({
+
+  const estados = STATUSES.map(st => ({ label: st, n: projects.filter(p=>p.estado===st).length }));
+  const ciudades = uniqueValues('ciudad')
+    .map(c => ({ label:c, n: projects.filter(p=>p.ciudad===c).length }))
+    .sort((a,b) => b.n - a.n);
+  const contratistas = uniqueValues('contratista')
+    .map(c => ({ label:c, n: projects.filter(p=>p.contratista===c).length }))
+    .sort((a,b) => b.n - a.n);
+
+  const timings = computeStageTimings();
+  // "Inicio de obra → Recaudo" abarca varias etapas a la vez, así que se
+  // excluye al buscar el cuello de botella para no compararla con pasos
+  // individuales y falsear la conclusión que se le presenta a gerencia.
+  const bottleneck = timings.filter(t => t.avg!==null && t.key!=='inicio_recaudo')
+    .sort((a,b) => b.avg - a.avg)[0] || null;
+
+  const porEstado = (st) => projects.filter(p=>p.estado===st).length;
+  const pendienteRecaudo = porEstado('LIQUIDADA') + porEstado('OC SOLICITADA') + porEstado('FACTURADA');
+
+  const last = arr => arr[arr.length-1];
+  const prev = arr => arr[arr.length-2];
+
+  const now = new Date();
+  return {
+    weeksBack: WEEKS_BACK,
+    buckets, facturadas, ocRecibida, recaudadas,
+    estados, ciudades, contratistas, timings, bottleneck,
+    total: projects.length,
+    enProceso: porEstado('EN PROCESO'),
+    porIniciar: porEstado('POR INICIAR'),
+    pendienteRecaudo,
+    recaudado: porEstado('RECAUDADO'),
+    semana: {
+      facturadas: { actual:last(facturadas), anterior:prev(facturadas) },
+      oc:         { actual:last(ocRecibida), anterior:prev(ocRecibida) },
+      recaudadas: { actual:last(recaudadas), anterior:prev(recaudadas) },
+      rango: buckets[buckets.length-1].label,
+    },
+    monthLabel: now.toLocaleDateString('es-CO', { month:'long', year:'numeric' }),
+    generatedAt: fmtDateTime(now.toISOString()),
+    preparedBy: (typeof currentUser === 'object' && currentUser && currentUser.name) ? currentUser.name : '—',
+    stamp: now.toISOString().slice(0,10),
+  };
+}
+
+/* ---------- Gráficos para el reporte (se dibujan fuera de pantalla) ---------- */
+// Fondo blanco: Chart.js entrega el lienzo transparente y, al incrustarlo en
+// Excel o PDF, se vería sucio sobre el color de la hoja.
+const reportWhiteBg = {
+  id:'reportWhiteBg',
+  beforeDraw(chart){
+    const { ctx } = chart;
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-over';
+    ctx.fillStyle = REPORT_BRAND.white;
+    ctx.fillRect(0, 0, chart.width, chart.height);
+    ctx.restore();
+  }
+};
+// En papel no hay tooltips, así que el valor de cada barra se imprime al lado.
+const reportValueLabels = {
+  id:'reportValueLabels',
+  afterDatasetsDraw(chart){
+    const { ctx } = chart;
+    const horizontal = chart.options.indexAxis === 'y';
+    ctx.save();
+    ctx.font = `600 12px ${REPORT_FONT}`;
+    ctx.fillStyle = REPORT_BRAND.ink;
+    chart.data.datasets.forEach((ds, di) => {
+      const meta = chart.getDatasetMeta(di);
+      if (meta.hidden) return;
+      meta.data.forEach((bar, i) => {
+        const raw = ds.data[i];
+        if (raw === null || raw === undefined || raw === '') return;
+        if (Number(raw) === 0) return;
+        if (horizontal){
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(String(raw), bar.x + 8, bar.y);
+        } else {
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(String(raw), bar.x, bar.y - 6);
+        }
+      });
+    });
+    ctx.restore();
+  }
+};
+
+function reportScales({ horizontal = false, padRight = 0 } = {}){
+  const valueAxis = {
+    beginAtZero: true,
+    grid: { color: REPORT_BRAND.grid, drawBorder:false },
+    border: { display:false },
+    ticks: { color: REPORT_BRAND.muted, font:{ family:REPORT_FONT, size:12 }, precision:0, padding:6 },
+    grace: padRight ? `${padRight}%` : 0,
+  };
+  const catAxis = {
+    grid: { display:false, drawBorder:false },
+    border: { display:false },
+    ticks: { color: REPORT_BRAND.ink, font:{ family:REPORT_FONT, size:12 }, autoSkip:false, padding:6 },
+  };
+  return horizontal ? { x: valueAxis, y: catAxis } : { x: catAxis, y: valueAxis };
+}
+function reportLegend(show){
+  return {
+    display: show,
+    position: 'bottom',
+    labels: {
+      color: REPORT_BRAND.ink,
+      font:{ family:REPORT_FONT, size:12.5 },
+      boxWidth:12, boxHeight:12, padding:16, usePointStyle:true, pointStyle:'circle',
+    },
+  };
+}
+
+// Define los cinco gráficos de la pestaña Análisis en su versión "para
+// imprimir": mismos datos y mismos colores, pero sin scroll ni tooltips y con
+// una altura calculada para que TODAS las etiquetas queden visibles.
+function buildReportChartSpecs(data){
+  const W = 1080;
+  const barStyle = { borderRadius:5, borderSkipped:false };
+
+  const specs = [];
+
+  specs.push({
+    key:'semanal',
+    title:`Facturación, OC y recaudo — últimas ${data.weeksBack} semanas`,
+    note:'Comparativo semanal (lunes a domingo) con base en las fechas reales registradas en cada proyecto. La semana en curso aún no termina, por lo que su total puede verse más bajo.',
+    width:W, height:520,
+    config:{
+      type:'bar',
+      data:{
+        labels: data.buckets.map(b=>b.label),
+        datasets:[
+          { label:'Facturadas',  data:data.facturadas, backgroundColor:'#7A5FC0', maxBarThickness:34, ...barStyle },
+          { label:'OC recibida', data:data.ocRecibida, backgroundColor:'#E08A2C', maxBarThickness:34, ...barStyle },
+          { label:'Recaudadas',  data:data.recaudadas, backgroundColor:'#141414', maxBarThickness:34, ...barStyle },
+        ],
+      },
+      options:{ plugins:{ legend:reportLegend(true), tooltip:{ enabled:false } }, scales:reportScales({ padRight:12 }) },
+    },
+  });
+
+  specs.push({
+    key:'estado',
+    title:'Estado actual de los proyectos',
+    note:`Cantidad total de proyectos que hay hoy en cada estado del proceso (${data.total} proyectos en total).`,
+    width:W, height:520,
+    config:{
+      type:'bar',
+      data:{
+        labels: data.estados.map(e=>e.label),
+        datasets:[{
+          label:'Proyectos',
+          data: data.estados.map(e=>e.n),
+          backgroundColor: data.estados.map(e => STATUS_COLORS[e.label] || REPORT_BRAND.black),
+          maxBarThickness:64, ...barStyle,
+        }],
+      },
+      options:{ plugins:{ legend:reportLegend(false), tooltip:{ enabled:false } }, scales:reportScales({ padRight:12 }) },
+    },
+  });
+
+  specs.push({
+    key:'tiempos',
+    title:'Tiempos promedio entre etapas (días)',
+    note:'Días que tarda, en promedio, un proyecto en pasar de una etapa a la siguiente. Solo se cuentan los proyectos con ambas fechas registradas y se excluyen los casos atípicos que distorsionan el promedio.',
+    width:W, height:Math.max(420, data.timings.length * 58 + 60),
+    config:{
+      type:'bar',
+      data:{
+        labels: data.timings.map(t=>t.label),
+        datasets:[{
+          label:'Días promedio',
+          data: data.timings.map(t=>t.avg),
+          backgroundColor: data.timings.map(t=>t.color),
+          maxBarThickness:28, ...barStyle,
+        }],
+      },
+      options:{ indexAxis:'y', plugins:{ legend:reportLegend(false), tooltip:{ enabled:false } }, scales:reportScales({ horizontal:true, padRight:14 }) },
+    },
+  });
+
+  specs.push({
+    key:'ciudad',
+    title:'Proyectos por ciudad',
+    note:`Total acumulado de proyectos abiertos en cada ciudad (${data.ciudades.length} ciudades).`,
+    width:W, height:Math.max(380, data.ciudades.length * 30 + 60),
+    config:{
+      type:'bar',
+      data:{
+        labels: data.ciudades.map(c=>c.label),
+        datasets:[{ label:'Proyectos', data:data.ciudades.map(c=>c.n), backgroundColor:'#3B7DD8', maxBarThickness:22, ...barStyle }],
+      },
+      options:{ indexAxis:'y', plugins:{ legend:reportLegend(false), tooltip:{ enabled:false } }, scales:reportScales({ horizontal:true, padRight:14 }) },
+    },
+  });
+
+  specs.push({
+    key:'contratista',
+    title:'Proyectos por contratista',
+    note:'Total acumulado de proyectos que ha desarrollado cada contratista.',
+    width:W, height:Math.max(380, data.contratistas.length * 32 + 60),
+    config:{
+      type:'bar',
+      data:{
+        labels: data.contratistas.map(c=>c.label),
+        datasets:[{ label:'Proyectos', data:data.contratistas.map(c=>c.n), backgroundColor:'#7A5FC0', maxBarThickness:22, ...barStyle }],
+      },
+      options:{ indexAxis:'y', plugins:{ legend:reportLegend(false), tooltip:{ enabled:false } }, scales:reportScales({ horizontal:true, padRight:14 }) },
+    },
+  });
+
+  return specs;
+}
+
+// Dibuja un gráfico en un lienzo colocado fuera de la pantalla y devuelve la
+// imagen PNG. Se hace así (y no copiando el <canvas> de la pestaña) para que
+// el reporte se pueda generar desde cualquier pestaña y con el tamaño fijo
+// que necesita el documento, no el que tenga el navegador en ese momento.
+async function renderReportChartImage(spec){
+  if (typeof Chart === 'undefined') return null;
+  const holder = document.createElement('div');
+  holder.setAttribute('aria-hidden', 'true');
+  holder.style.cssText = `position:fixed;left:-99999px;top:0;width:${spec.width}px;height:${spec.height}px;background:#fff;pointer-events:none;`;
+  const canvas = document.createElement('canvas');
+  canvas.width = spec.width;
+  canvas.height = spec.height;
+  holder.appendChild(canvas);
+  document.body.appendChild(holder);
+
+  let dataUrl = null;
+  let chart = null;
+  try{
+    chart = new Chart(canvas, {
+      ...spec.config,
+      options:{
+        ...spec.config.options,
+        responsive:false,
+        maintainAspectRatio:false,
+        animation:false,
+        devicePixelRatio:2,
+        layout:{ padding:{ top:16, right:26, bottom:8, left:8 } },
+        font:{ family:REPORT_FONT },
+      },
+      plugins:[reportWhiteBg, reportValueLabels],
+    });
+    await new Promise(r => setTimeout(r, 40));
+    dataUrl = chart.toBase64Image('image/png', 1);
+  }catch(err){
+    console.error('No se pudo generar la imagen del gráfico', spec.key, err);
+  }finally{
+    try{ if (chart) chart.destroy(); }catch(e){}
+    holder.remove();
+  }
+  return dataUrl;
+}
+
+async function renderReportChartImages(data){
+  const specs = buildReportChartSpecs(data);
+  const out = [];
+  for (const spec of specs){
+    const dataUrl = await renderReportChartImage(spec);
+    out.push({ ...spec, dataUrl });
+  }
+  return out;
+}
+
+// El logo de la barra superior está en formato GIF; jsPDF y ExcelJS solo
+// admiten PNG/JPEG, así que se repinta en un lienzo para convertirlo.
+function getBrandLogoPNG(){
+  try{
+    const img = document.querySelector('.topbar-logo');
+    if (!img || !img.complete || !img.naturalWidth) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    return { dataUrl: canvas.toDataURL('image/png'), width: canvas.width, height: canvas.height };
+  }catch(err){
+    console.warn('No se pudo convertir el logo para el reporte', err);
+    return null;
+  }
+}
+
+// Mientras se dibujan los gráficos y se arma el archivo pasan uno o dos
+// segundos: el botón queda deshabilitado y avisa que está trabajando, para
+// que nadie crea que no pasó nada y lo pulse varias veces.
+async function withReportBusy(action, label, task){
+  const btn = document.querySelector(`[data-action="${action}"]`);
+  const original = btn ? btn.textContent : null;
+  if (btn){ btn.disabled = true; btn.textContent = label; }
+  try{
+    await task();
+  }catch(err){
+    console.error(err);
+    alert('No se pudo generar el reporte. Revisa tu conexión a internet y vuelve a intentarlo.');
+  }finally{
+    if (btn){ btn.disabled = false; if (original !== null) btn.textContent = original; }
+  }
+}
+
+/* ---------- Reporte ejecutivo mensual en Excel (con gráficos) ---------- */
+function exportMonthlyReport(){
+  return withReportBusy('export-monthly-report', 'Generando Excel…', async () => {
+    const data = buildMonthlyReportData();
+    if (typeof window.ExcelJS === 'undefined'){
+      // Sin la librería de formato (p. ej. sin internet) igual se entrega el
+      // Excel con todos los datos, solo que sin estilos ni gráficos.
+      exportMonthlyReportPlain(data);
+      alert('El reporte se descargó con los datos, pero sin gráficos ni formato: no se pudo cargar la librería de Excel avanzada. Revisa tu conexión a internet e inténtalo de nuevo para obtener la versión completa.');
+      return;
+    }
+    const charts = await renderReportChartImages(data);
+    const byKey = Object.fromEntries(charts.map(c => [c.key, c]));
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Syntesys Tecnológica S.A.S';
+    wb.company = 'Syntesys Tecnológica S.A.S';
+    wb.created = new Date();
+
+    const logo = getBrandLogoPNG();
+    const logoId = logo ? wb.addImage({ base64: logo.dataUrl, extension:'png' }) : null;
+
+    /* --- Utilidades de formato --- */
+    const titleBand = (ws, title, subtitle, lastCol) => {
+      ws.mergeCells(1, 1, 1, lastCol);
+      const t = ws.getCell(1,1);
+      t.value = title;
+      t.font = { name:'Calibri', size:16, bold:true, color: xlColor(REPORT_BRAND.yellow) };
+      t.fill = { type:'pattern', pattern:'solid', fgColor: xlColor(REPORT_BRAND.black) };
+      t.alignment = { vertical:'middle', horizontal:'left', indent:1 };
+      ws.getRow(1).height = 30;
+
+      ws.mergeCells(2, 1, 2, lastCol);
+      const s = ws.getCell(2,1);
+      s.value = subtitle;
+      s.font = { name:'Calibri', size:10, color: xlColor(REPORT_BRAND.muted) };
+      s.fill = { type:'pattern', pattern:'solid', fgColor: xlColor(REPORT_BRAND.soft) };
+      s.alignment = { vertical:'middle', horizontal:'left', indent:1, wrapText:true };
+      ws.getRow(2).height = 28;
+      ws.getRow(3).height = 6;
+    };
+    const headerRow = (ws, rowIdx, values) => {
+      const row = ws.getRow(rowIdx);
+      values.forEach((v, i) => {
+        const cell = row.getCell(i+1);
+        cell.value = v;
+        cell.font = { name:'Calibri', size:11, bold:true, color: xlColor(REPORT_BRAND.yellow) };
+        cell.fill = { type:'pattern', pattern:'solid', fgColor: xlColor(REPORT_BRAND.black) };
+        cell.alignment = { vertical:'middle', horizontal: i===0 ? 'left' : 'center', wrapText:true };
+        cell.border = { bottom:{ style:'thin', color: xlColor(REPORT_BRAND.yellow) } };
+      });
+      row.height = 24;
+      return row;
+    };
+    const bodyRow = (ws, rowIdx, values, opts = {}) => {
+      const row = ws.getRow(rowIdx);
+      values.forEach((v, i) => {
+        const cell = row.getCell(i+1);
+        cell.value = v;
+        cell.font = { name:'Calibri', size:11, bold: !!opts.bold, color: xlColor(REPORT_BRAND.ink) };
+        cell.alignment = { vertical:'middle', horizontal: i===0 ? 'left' : 'center' };
+        cell.border = {
+          top:{ style:'hair', color: xlColor(REPORT_BRAND.line) },
+          bottom:{ style:'hair', color: xlColor(REPORT_BRAND.line) },
+        };
+        if (opts.zebra){
+          cell.fill = { type:'pattern', pattern:'solid', fgColor: xlColor(REPORT_BRAND.soft) };
+        }
+        if (opts.highlight){
+          cell.fill = { type:'pattern', pattern:'solid', fgColor: xlColor('#FDF6C9') };
+        }
+      });
+      row.height = 19;
+      return row;
+    };
+    const table = (ws, startRow, head, rows, opts = {}) => {
+      headerRow(ws, startRow, head);
+      rows.forEach((r, i) => bodyRow(ws, startRow + 1 + i, r, {
+        zebra: i % 2 === 1,
+        highlight: opts.highlightIndex === i,
+      }));
+      const totalRow = startRow + rows.length;
+      if (opts.total){
+        bodyRow(ws, totalRow + 1, opts.total, { bold:true });
+        return totalRow + 1;
+      }
+      return totalRow;
+    };
+    const placeChart = (ws, chart, row, maxWidth = 980) => {
+      if (!chart || !chart.dataUrl) return row + 2;
+      const id = wb.addImage({ base64: chart.dataUrl, extension:'png' });
+      const scale = Math.min(1, maxWidth / chart.width);
+      const w = Math.round(chart.width * scale);
+      const h = Math.round(chart.height * scale);
+      ws.addImage(id, { tl:{ col:0.2, row: row + 0.4 }, ext:{ width:w, height:h } });
+      return row + Math.ceil(h / 19) + 3; // ~19 px por fila
+    };
+
+    /* --- Hoja 1: Portada / resumen ejecutivo --- */
+    const wsPortada = wb.addWorksheet('Resumen ejecutivo', {
+      views:[{ showGridLines:false }],
+      pageSetup:{ paperSize:9, orientation:'portrait', fitToPage:true, fitToWidth:1, fitToHeight:0 },
+    });
+    wsPortada.columns = [{ width:34 },{ width:18 },{ width:18 },{ width:18 },{ width:18 }];
+
+    wsPortada.mergeCells('A1:E3');
+    const cover = wsPortada.getCell('A1');
+    cover.value = {
+      richText:[
+        { text:'REPORTE EJECUTIVO MENSUAL\n', font:{ size:20, bold:true, color: xlColor(REPORT_BRAND.yellow), name:'Calibri' } },
+        { text:'Syntesys Tecnológica S.A.S — Estado General de Proyectos DC', font:{ size:11, color: xlColor(REPORT_BRAND.white), name:'Calibri' } },
+      ],
+    };
+    cover.fill = { type:'pattern', pattern:'solid', fgColor: xlColor(REPORT_BRAND.black) };
+    cover.alignment = { vertical:'middle', horizontal:'left', indent:2, wrapText:true };
+    wsPortada.getRow(1).height = 26;
+    wsPortada.getRow(2).height = 26;
+    wsPortada.getRow(3).height = 26;
+    if (logoId !== null){
+      wsPortada.addImage(logoId, { tl:{ col:4.05, row:0.35 }, ext:{ width:84, height: Math.round(84 * (logo.height/logo.width)) } });
+    }
+
+    wsPortada.mergeCells('A4:E4');
+    const meta = wsPortada.getCell('A4');
+    meta.value = `Periodo: ${data.monthLabel}  ·  Generado: ${data.generatedAt}  ·  Preparado por: ${data.preparedBy}`;
+    meta.font = { name:'Calibri', size:10, color: xlColor(REPORT_BRAND.muted) };
+    meta.fill = { type:'pattern', pattern:'solid', fgColor: xlColor(REPORT_BRAND.soft) };
+    meta.alignment = { vertical:'middle', horizontal:'left', indent:2 };
+    wsPortada.getRow(4).height = 22;
+
+    // Indicadores clave
+    let r = 6;
+    wsPortada.getCell(r,1).value = 'INDICADORES CLAVE';
+    wsPortada.getCell(r,1).font = { name:'Calibri', size:12, bold:true, color: xlColor(REPORT_BRAND.ink) };
+    r += 1;
+    const kpiPairs = [
+      ['Proyectos totales', data.total],
+      ['En ejecución (EN PROCESO)', data.enProceso],
+      ['Por iniciar', data.porIniciar],
+      ['Pendientes por recaudar', data.pendienteRecaudo],
+      ['Recaudados', data.recaudado],
+    ];
+    r = table(wsPortada, r, ['Indicador','Valor'], kpiPairs.map(([k,v]) => [k, v]));
+    r += 2;
+
+    wsPortada.getCell(r,1).value = `ACTIVIDAD DE LA SEMANA EN CURSO (${data.semana.rango})`;
+    wsPortada.getCell(r,1).font = { name:'Calibri', size:12, bold:true, color: xlColor(REPORT_BRAND.ink) };
+    r += 1;
+    const delta = (o) => {
+      const d = o.actual - o.anterior;
+      return `${d > 0 ? '+' : ''}${d}`;
+    };
+    r = table(wsPortada, r, ['Movimiento','Esta semana','Semana anterior','Variación'], [
+      ['Tiendas facturadas', data.semana.facturadas.actual, data.semana.facturadas.anterior, delta(data.semana.facturadas)],
+      ['Tiendas con OC recibida', data.semana.oc.actual, data.semana.oc.anterior, delta(data.semana.oc)],
+      ['Tiendas recaudadas', data.semana.recaudadas.actual, data.semana.recaudadas.anterior, delta(data.semana.recaudadas)],
+    ]);
+    r += 2;
+
+    wsPortada.mergeCells(r, 1, r, 5);
+    const note = wsPortada.getCell(r,1);
+    note.value = data.bottleneck
+      ? `Punto de atención: el mayor cuello de botella del proceso es "${data.bottleneck.label}", con un promedio real de ${data.bottleneck.avg} días. La semana en curso todavía no termina, así que sus totales pueden verse más bajos solo porque faltan días por contar.`
+      : 'La semana en curso todavía no termina, así que sus totales pueden verse más bajos solo porque faltan días por contar.';
+    note.font = { name:'Calibri', size:10, italic:true, color: xlColor(REPORT_BRAND.ink) };
+    note.alignment = { vertical:'top', horizontal:'left', wrapText:true, indent:1 };
+    note.fill = { type:'pattern', pattern:'solid', fgColor: xlColor('#FDF6C9') };
+    wsPortada.getRow(r).height = 46;
+
+    /* --- Hoja 2: Comparativo semanal --- */
+    const wsSemanal = wb.addWorksheet('Comparativo semanal', { views:[{ showGridLines:false }] });
+    wsSemanal.columns = [{ width:22 },{ width:22 },{ width:24 },{ width:22 }];
+    titleBand(wsSemanal, 'Comparativo semanal (lunes a domingo)', `Últimas ${data.weeksBack} semanas, según las fechas reales registradas en cada proyecto.`, 4);
+    let rowS = table(wsSemanal, 4, ['Semana','Tiendas facturadas','Tiendas con OC recibida','Tiendas recaudadas'],
+      data.buckets.map((b,i) => [b.label, data.facturadas[i], data.ocRecibida[i], data.recaudadas[i]]),
+      { total:['TOTAL',
+          data.facturadas.reduce((s,x)=>s+x,0),
+          data.ocRecibida.reduce((s,x)=>s+x,0),
+          data.recaudadas.reduce((s,x)=>s+x,0)] });
+    placeChart(wsSemanal, byKey.semanal, rowS + 1);
+
+    /* --- Hoja 3: Estado de los proyectos --- */
+    const wsEstado = wb.addWorksheet('Estado de proyectos', { views:[{ showGridLines:false }] });
+    wsEstado.columns = [{ width:28 },{ width:16 },{ width:16 }];
+    titleBand(wsEstado, 'Estado actual de los proyectos', `Foto de cómo está la operación hoy: ${data.total} proyectos distribuidos por estado del proceso.`, 3);
+    let rowE = table(wsEstado, 4, ['Estado','Proyectos','Participación'],
+      data.estados.map(e => [e.label, e.n, data.total ? `${Math.round(e.n / data.total * 100)}%` : '0%']),
+      { total:['TOTAL', data.total, '100%'] });
+    placeChart(wsEstado, byKey.estado, rowE + 1);
+
+    /* --- Hoja 4: Tiempos entre etapas --- */
+    const wsTiempos = wb.addWorksheet('Tiempos entre etapas', { views:[{ showGridLines:false }] });
+    wsTiempos.columns = [{ width:40 },{ width:16 },{ width:16 },{ width:18 },{ width:20 }];
+    titleBand(wsTiempos, 'Tiempos promedio entre etapas', 'Días entre una etapa y la siguiente, ya depurados de casos atípicos (más de 2 desviaciones estándar).', 5);
+    const bottleneckIndex = data.bottleneck ? data.timings.findIndex(t => t.key === data.bottleneck.key) : -1;
+    let rowT = table(wsTiempos, 4,
+      ['Etapa','Días promedio','Desviación','Proyectos usados','Atípicos excluidos'],
+      data.timings.map(t => [
+        t.label,
+        t.avg === null ? '—' : t.avg,
+        t.stdDev === null ? '—' : t.stdDev,
+        t.nClean,
+        t.outliers,
+      ]),
+      { highlightIndex: bottleneckIndex });
+    placeChart(wsTiempos, byKey.tiempos, rowT + 1);
+
+    /* --- Hoja 5: Por ciudad --- */
+    const wsCiudad = wb.addWorksheet('Por ciudad', { views:[{ showGridLines:false }] });
+    wsCiudad.columns = [{ width:30 },{ width:16 },{ width:16 }];
+    titleBand(wsCiudad, 'Proyectos por ciudad', `Total acumulado de proyectos abiertos en cada una de las ${data.ciudades.length} ciudades.`, 3);
+    let rowC = table(wsCiudad, 4, ['Ciudad','Proyectos','Participación'],
+      data.ciudades.map(c => [c.label, c.n, data.total ? `${Math.round(c.n / data.total * 100)}%` : '0%']),
+      { total:['TOTAL', data.total, '100%'] });
+    placeChart(wsCiudad, byKey.ciudad, rowC + 1);
+
+    /* --- Hoja 6: Por contratista --- */
+    const wsContratista = wb.addWorksheet('Por contratista', { views:[{ showGridLines:false }] });
+    wsContratista.columns = [{ width:34 },{ width:16 },{ width:16 }];
+    titleBand(wsContratista, 'Proyectos por contratista', 'Total acumulado de proyectos desarrollados por cada contratista.', 3);
+    let rowK = table(wsContratista, 4, ['Contratista','Proyectos','Participación'],
+      data.contratistas.map(c => [c.label, c.n, data.total ? `${Math.round(c.n / data.total * 100)}%` : '0%']),
+      { total:['TOTAL', data.contratistas.reduce((s,c)=>s+c.n,0), '100%'] });
+    placeChart(wsContratista, byKey.contratista, rowK + 1);
+
+    const buffer = await wb.xlsx.writeBuffer();
+    downloadBlob(new Blob([buffer], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+      `Reporte_Ejecutivo_DC_${data.stamp}.xlsx`);
+    logChange({ project:'—', text:`Descargó el reporte ejecutivo mensual con gráficos en Excel (${data.monthLabel}).` });
+  });
+}
+
+// Respaldo sin formato ni gráficos (se usa solo si ExcelJS no cargó).
+function exportMonthlyReportPlain(data){
+  const wb = XLSX.utils.book_new();
+
+  const resumenRows = data.estados.map(e => ({ Estado: e.label, Proyectos: e.n }));
+  resumenRows.push({ Estado:'TOTAL', Proyectos: data.total });
+  const wsResumen = XLSX.utils.json_to_sheet(resumenRows);
+  wsResumen['!cols'] = [{ wch:20 },{ wch:12 }];
+  XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen por estado');
+
+  const wsSemanal = XLSX.utils.json_to_sheet(data.buckets.map((b,i) => ({
     Semana: b.label,
-    'Tiendas facturadas': facturadas[i],
-    'Tiendas con OC recibida': ocRecibida[i],
-    'Tiendas recaudadas': recaudadas[i],
-  }));
-  const wsSemanal = XLSX.utils.json_to_sheet(semanalRows);
+    'Tiendas facturadas': data.facturadas[i],
+    'Tiendas con OC recibida': data.ocRecibida[i],
+    'Tiendas recaudadas': data.recaudadas[i],
+  })));
   wsSemanal['!cols'] = [{ wch:18 },{ wch:20 },{ wch:24 },{ wch:20 }];
   XLSX.utils.book_append_sheet(wb, wsSemanal, 'Semanal');
 
-  const ciudadRows = uniqueValues('ciudad')
-    .map(c => ({ Ciudad: c, Proyectos: projects.filter(p=>p.ciudad===c).length }))
-    .sort((a,b) => b.Proyectos - a.Proyectos);
-  const wsCiudad = XLSX.utils.json_to_sheet(ciudadRows);
+  const wsCiudad = XLSX.utils.json_to_sheet(data.ciudades.map(c => ({ Ciudad:c.label, Proyectos:c.n })));
   wsCiudad['!cols'] = [{ wch:24 },{ wch:12 }];
   XLSX.utils.book_append_sheet(wb, wsCiudad, 'Por ciudad');
 
-  const contratistaRows = uniqueValues('contratista')
-    .map(c => ({ Contratista: c, Proyectos: projects.filter(p=>p.contratista===c).length }))
-    .sort((a,b) => b.Proyectos - a.Proyectos);
-  const wsContratista = XLSX.utils.json_to_sheet(contratistaRows);
+  const wsContratista = XLSX.utils.json_to_sheet(data.contratistas.map(c => ({ Contratista:c.label, Proyectos:c.n })));
   wsContratista['!cols'] = [{ wch:28 },{ wch:12 }];
   XLSX.utils.book_append_sheet(wb, wsContratista, 'Por contratista');
 
-  const timingRows = computeStageTimings().map(t => ({
+  const wsTiempos = XLSX.utils.json_to_sheet(data.timings.map(t => ({
     'Etapa': t.label,
     'Promedio (días)': t.avg === null ? '—' : t.avg,
     'Desviación (días)': t.stdDev === null ? '—' : t.stdDev,
     'Proyectos con ambas fechas': t.n,
-  }));
-  const wsTiempos = XLSX.utils.json_to_sheet(timingRows);
+  })));
   wsTiempos['!cols'] = [{ wch:36 },{ wch:16 },{ wch:16 },{ wch:24 }];
   XLSX.utils.book_append_sheet(wb, wsTiempos, 'Tiempos entre etapas');
 
-  const stamp = new Date().toISOString().slice(0,10);
-  const monthLabel = new Date().toLocaleDateString('es-CO', { month:'long', year:'numeric' });
-  XLSX.writeFile(wb, `Reporte_Ejecutivo_DC_${stamp}.xlsx`);
-  logChange({ project:'—', text:`Descargó el reporte ejecutivo mensual (${monthLabel}).` });
+  XLSX.writeFile(wb, `Reporte_Ejecutivo_DC_${data.stamp}.xlsx`);
+  logChange({ project:'—', text:`Descargó el reporte ejecutivo mensual (${data.monthLabel}).` });
+}
+
+/* ---------- Reporte ejecutivo mensual en PDF ---------- */
+function exportMonthlyReportPDF(){
+  return withReportBusy('export-monthly-report-pdf', 'Generando PDF…', async () => {
+    if (typeof window.jspdf === 'undefined'){
+      alert('No se pudo cargar la librería de PDF. Revisa tu conexión a internet y actualiza la página.');
+      return;
+    }
+    const data = buildMonthlyReportData();
+    const charts = await renderReportChartImages(data);
+    const byKey = Object.fromEntries(charts.map(c => [c.key, c]));
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit:'pt', format:'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const M = 42;                    // margen lateral
+    const CW = pageW - M * 2;        // ancho útil
+    const BOTTOM = pageH - 56;       // línea a partir de la cual va el pie
+
+    const BLACK = hexToRgb(REPORT_BRAND.black);
+    const YELLOW = hexToRgb(REPORT_BRAND.yellow);
+    const INK = hexToRgb(REPORT_BRAND.ink);
+    const MUTED = hexToRgb(REPORT_BRAND.muted);
+    const LINE = hexToRgb(REPORT_BRAND.line);
+    const SOFT = hexToRgb(REPORT_BRAND.soft);
+
+    const tableStyle = {
+      theme:'grid',
+      styles:{ font:'helvetica', fontSize:9.5, cellPadding:6, textColor:INK, lineColor:LINE, lineWidth:0.5 },
+      headStyles:{ fillColor:BLACK, textColor:YELLOW, fontStyle:'bold', fontSize:10 },
+      alternateRowStyles:{ fillColor:SOFT },
+      margin:{ left:M, right:M },
+    };
+
+    // Las fuentes estándar de jsPDF (Helvetica) no incluyen flechas ni
+    // triángulos: se reemplazan por caracteres equivalentes que sí existen,
+    // para que las etiquetas no salgan con símbolos rotos en el documento.
+    const pdfSafe = (s) => String(s)
+      .replace(/\u2192/g, '\u203A')
+      .replace(/[\u25B2\u25BC]/g, '')
+      .trim();
+
+    let y = 0;
+
+    /* ---- PORTADA ---- */
+    doc.setFillColor(...BLACK);
+    doc.rect(0, 0, pageW, 250, 'F');
+    doc.setFillColor(...YELLOW);
+    doc.rect(0, 250, pageW, 6, 'F');
+
+    const logo = getBrandLogoPNG();
+    if (logo){
+      const lw = 96;
+      const lh = lw * (logo.height / logo.width);
+      try{ doc.addImage(logo.dataUrl, 'PNG', M, 42, lw, lh); }catch(e){}
+    }
+
+    doc.setTextColor(...YELLOW);
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(26);
+    doc.text('Reporte ejecutivo mensual', M, 160);
+    doc.setTextColor(255,255,255);
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(12);
+    doc.text('Syntesys Tecnológica S.A.S — Estado General de Proyectos DC', M, 182);
+    doc.setFontSize(10);
+    doc.setTextColor(200,200,195);
+    doc.text(`Periodo: ${data.monthLabel}`, M, 208);
+    doc.text(`Generado: ${data.generatedAt}   ·   Preparado por: ${data.preparedBy}`, M, 224);
+
+    /* ---- INDICADORES CLAVE (tarjetas) ---- */
+    y = 292;
+    doc.setTextColor(...INK);
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(13);
+    doc.text('Indicadores clave', M, y);
+    y += 14;
+
+    const kpis = [
+      { label:'Proyectos totales', value:data.total },
+      { label:'En ejecución', value:data.enProceso },
+      { label:'Por iniciar', value:data.porIniciar },
+      { label:'Pend. por recaudar', value:data.pendienteRecaudo },
+    ];
+    const gap = 10;
+    const cardW = (CW - gap * (kpis.length - 1)) / kpis.length;
+    const cardH = 68;
+    kpis.forEach((k, i) => {
+      const x = M + i * (cardW + gap);
+      doc.setFillColor(...SOFT);
+      doc.setDrawColor(...LINE);
+      doc.roundedRect(x, y, cardW, cardH, 6, 6, 'FD');
+      doc.setFillColor(...YELLOW);
+      doc.rect(x, y, 4, cardH, 'F');
+      doc.setTextColor(...MUTED);
+      doc.setFont('helvetica','normal');
+      doc.setFontSize(8.5);
+      doc.text(doc.splitTextToSize(k.label.toUpperCase(), cardW - 18), x + 12, y + 20);
+      doc.setTextColor(...INK);
+      doc.setFont('helvetica','bold');
+      doc.setFontSize(24);
+      doc.text(String(k.value), x + 12, y + 54);
+    });
+    y += cardH + 26;
+
+    /* ---- Actividad de la semana ---- */
+    doc.setTextColor(...INK);
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(13);
+    doc.text(`Actividad de la semana en curso (${data.semana.rango})`, M, y);
+    y += 6;
+    const deltaTxt = (o) => {
+      const d = o.actual - o.anterior;
+      return d > 0 ? `+${d}` : d < 0 ? String(d) : '0';
+    };
+    doc.autoTable({
+      ...tableStyle,
+      startY: y + 8,
+      head:[['Movimiento','Esta semana','Semana anterior','Variación']],
+      body:[
+        ['Tiendas facturadas', data.semana.facturadas.actual, data.semana.facturadas.anterior, deltaTxt(data.semana.facturadas)],
+        ['Tiendas con OC recibida', data.semana.oc.actual, data.semana.oc.anterior, deltaTxt(data.semana.oc)],
+        ['Tiendas recaudadas', data.semana.recaudadas.actual, data.semana.recaudadas.anterior, deltaTxt(data.semana.recaudadas)],
+      ],
+      columnStyles:{ 1:{ halign:'center' }, 2:{ halign:'center' }, 3:{ halign:'center' } },
+    });
+    y = doc.lastAutoTable.finalY + 22;
+
+    // Nota de lectura / cuello de botella
+    const notaTxt = data.bottleneck
+      ? `Punto de atención: el mayor cuello de botella del proceso es "${data.bottleneck.label}", con un promedio real de ${data.bottleneck.avg} días. Nota de lectura: la semana en curso aún no termina, por lo que sus totales pueden verse más bajos solo porque faltan días por contar.`
+      : 'Nota de lectura: la semana en curso aún no termina, por lo que sus totales pueden verse más bajos solo porque faltan días por contar.';
+    const notaLines = doc.splitTextToSize(pdfSafe(notaTxt), CW - 24);
+    const notaH = notaLines.length * 12 + 20;
+    doc.setFillColor(253, 246, 201);
+    doc.setDrawColor(...LINE);
+    doc.roundedRect(M, y, CW, notaH, 6, 6, 'FD');
+    doc.setFillColor(...YELLOW);
+    doc.rect(M, y, 4, notaH, 'F');
+    doc.setTextColor(...INK);
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(9.5);
+    doc.text(notaLines, M + 14, y + 16);
+
+    /* ---- Secciones con gráfico + tabla ---- */
+    const ensureSpace = (needed) => {
+      if (y + needed > BOTTOM){
+        doc.addPage();
+        y = 52;
+        return true;
+      }
+      return false;
+    };
+    const sectionTitle = (title, note) => {
+      ensureSpace(90);
+      doc.setFillColor(...YELLOW);
+      doc.rect(M, y - 10, 4, 18, 'F');
+      doc.setTextColor(...INK);
+      doc.setFont('helvetica','bold');
+      doc.setFontSize(14);
+      doc.text(pdfSafe(title), M + 12, y + 3);
+      y += 16;
+      if (note){
+        doc.setFont('helvetica','normal');
+        doc.setFontSize(9);
+        doc.setTextColor(...MUTED);
+        const lines = doc.splitTextToSize(pdfSafe(note), CW);
+        doc.text(lines, M, y + 6);
+        y += lines.length * 11 + 8;
+      }
+      doc.setTextColor(...INK);
+    };
+    const addChart = (chart) => {
+      if (!chart || !chart.dataUrl) return;
+      let w = CW;
+      let h = chart.height * (w / chart.width);
+      const maxH = BOTTOM - 52;               // alto máximo de una página limpia
+      if (h > maxH){                          // gráficos muy altos (ciudades): se ajustan
+        h = maxH;
+        w = chart.width * (h / chart.height);
+      }
+      if (y + h > BOTTOM){ doc.addPage(); y = 52; }
+      try{
+        doc.addImage(chart.dataUrl, 'PNG', M + (CW - w) / 2, y, w, h, undefined, 'FAST');
+        y += h + 16;
+      }catch(err){
+        console.error('No se pudo incrustar el gráfico en el PDF', err);
+      }
+    };
+
+    // 1) Comparativo semanal
+    doc.addPage(); y = 52;
+    sectionTitle(`Comparativo semanal — últimas ${data.weeksBack} semanas`, byKey.semanal ? byKey.semanal.note : '');
+    addChart(byKey.semanal);
+    ensureSpace(120);
+    doc.autoTable({
+      ...tableStyle,
+      startY: y,
+      head:[['Semana','Tiendas facturadas','Tiendas con OC recibida','Tiendas recaudadas']],
+      body: data.buckets.map((b,i) => [b.label, data.facturadas[i], data.ocRecibida[i], data.recaudadas[i]]),
+      foot:[['TOTAL',
+        data.facturadas.reduce((s,x)=>s+x,0),
+        data.ocRecibida.reduce((s,x)=>s+x,0),
+        data.recaudadas.reduce((s,x)=>s+x,0)]],
+      footStyles:{ fillColor:[235,232,223], textColor:INK, fontStyle:'bold' },
+      columnStyles:{ 1:{ halign:'center' }, 2:{ halign:'center' }, 3:{ halign:'center' } },
+    });
+    y = doc.lastAutoTable.finalY + 26;
+
+    // 2) Estado actual
+    doc.addPage(); y = 52;
+    sectionTitle('Estado actual de los proyectos', byKey.estado ? byKey.estado.note : '');
+    addChart(byKey.estado);
+    ensureSpace(140);
+    doc.autoTable({
+      ...tableStyle,
+      startY: y,
+      head:[['Estado','Proyectos','Participación']],
+      body: data.estados.map(e => [e.label, e.n, data.total ? `${Math.round(e.n / data.total * 100)}%` : '0%']),
+      foot:[['TOTAL', data.total, '100%']],
+      footStyles:{ fillColor:[235,232,223], textColor:INK, fontStyle:'bold' },
+      columnStyles:{ 1:{ halign:'center' }, 2:{ halign:'center' } },
+    });
+    y = doc.lastAutoTable.finalY + 26;
+
+    // 3) Tiempos entre etapas
+    doc.addPage(); y = 52;
+    sectionTitle('Tiempos promedio entre etapas', byKey.tiempos ? byKey.tiempos.note : '');
+    addChart(byKey.tiempos);
+    ensureSpace(150);
+    doc.autoTable({
+      ...tableStyle,
+      startY: y,
+      head:[['Etapa','Días prom.','Desviación','Proyectos usados','Atípicos excl.']],
+      body: data.timings.map(t => [
+        pdfSafe(t.label),
+        t.avg === null ? '—' : String(t.avg),
+        t.stdDev === null ? '—' : `± ${t.stdDev}`,
+        String(t.nClean),
+        String(t.outliers),
+      ]),
+      columnStyles:{ 1:{ halign:'center' }, 2:{ halign:'center' }, 3:{ halign:'center' }, 4:{ halign:'center' } },
+      didParseCell: (hook) => {
+        if (hook.section === 'body' && data.bottleneck && data.timings[hook.row.index] &&
+            data.timings[hook.row.index].key === data.bottleneck.key){
+          hook.cell.styles.fillColor = [253, 246, 201];
+          hook.cell.styles.fontStyle = 'bold';
+        }
+      },
+    });
+    y = doc.lastAutoTable.finalY + 26;
+
+    // 4) Proyectos por ciudad
+    doc.addPage(); y = 52;
+    sectionTitle('Proyectos por ciudad', byKey.ciudad ? byKey.ciudad.note : '');
+    addChart(byKey.ciudad);
+    ensureSpace(140);
+    doc.autoTable({
+      ...tableStyle,
+      startY: y,
+      head:[['Ciudad','Proyectos','Participación']],
+      body: data.ciudades.map(c => [c.label, c.n, data.total ? `${Math.round(c.n / data.total * 100)}%` : '0%']),
+      foot:[['TOTAL', data.total, '100%']],
+      footStyles:{ fillColor:[235,232,223], textColor:INK, fontStyle:'bold' },
+      columnStyles:{ 1:{ halign:'center' }, 2:{ halign:'center' } },
+    });
+    y = doc.lastAutoTable.finalY + 26;
+
+    // 5) Proyectos por contratista
+    doc.addPage(); y = 52;
+    sectionTitle('Proyectos por contratista', byKey.contratista ? byKey.contratista.note : '');
+    addChart(byKey.contratista);
+    ensureSpace(140);
+    doc.autoTable({
+      ...tableStyle,
+      startY: y,
+      head:[['Contratista','Proyectos','Participación']],
+      body: data.contratistas.map(c => [c.label, c.n, data.total ? `${Math.round(c.n / data.total * 100)}%` : '0%']),
+      foot:[['TOTAL', data.contratistas.reduce((s,c)=>s+c.n,0), '100%']],
+      footStyles:{ fillColor:[235,232,223], textColor:INK, fontStyle:'bold' },
+      columnStyles:{ 1:{ halign:'center' }, 2:{ halign:'center' } },
+    });
+
+    /* ---- Pie de página en todas las hojas (menos la portada) ---- */
+    const total = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= total; i++){
+      doc.setPage(i);
+      if (i === 1) continue;
+      doc.setDrawColor(...LINE);
+      doc.setLineWidth(0.5);
+      doc.line(M, pageH - 44, pageW - M, pageH - 44);
+      doc.setFont('helvetica','normal');
+      doc.setFontSize(8);
+      doc.setTextColor(...MUTED);
+      doc.text('Syntesys Tecnológica S.A.S — Reporte ejecutivo mensual · Documento interno', M, pageH - 30);
+      doc.text(`Página ${i} de ${total}`, pageW - M, pageH - 30, { align:'right' });
+    }
+
+    doc.save(`Reporte_Ejecutivo_DC_${data.stamp}.pdf`);
+    logChange({ project:'—', text:`Descargó el reporte ejecutivo mensual en PDF (${data.monthLabel}).` });
+  });
+}
+
+/* =========================================================
+   REPORTE PERSONALIZADO (pestaña Proyección)
+   ---------------------------------------------------------
+   Permite armar un informe a la medida: se escoge qué estados,
+   ciudades, departamentos, coordinadores y contratistas se
+   incluyen, un rango de fechas sobre el campo que interese
+   (inicio de obra, entrega, recaudo…), qué columnas mostrar y
+   cómo agrupar el resultado. La salida es un PDF con la
+   identidad corporativa (negro / amarillo), portada, resumen,
+   gráficos y las tablas de detalle.
+   ========================================================= */
+
+// Sentinela para los proyectos que no tienen valor en un campo: así se pueden
+// incluir o excluir a propósito en vez de desaparecer sin avisar.
+const CR_EMPTY = '__SIN_DATO__';
+const CR_EMPTY_LABEL = '(Sin asignar)';
+
+// Campos que se pueden usar para filtrar por rango de fechas.
+const CR_DATE_FIELDS = [
+  { key:'fInicioObra',         label:'Inicio real de obra' },
+  { key:'fEntrega',            label:'Entrega al cliente' },
+  { key:'fLiquidacion',        label:'Liquidación' },
+  { key:'fRecepcionOC',        label:'Recepción de OC' },
+  { key:'fEmisionFactura',     label:'Emisión de factura' },
+  { key:'fFacturacionRecaudo', label:'Facturación de recaudo' },
+  { key:'fEnvioCot',           label:'Envío de cotización' },
+  { key:'fAprobCot',           label:'Aprobación de cotización' },
+];
+
+// Columnas disponibles para la tabla de detalle del PDF.
+const CR_COLUMNS = [
+  { key:'cliente',             label:'Cliente',            def:true },
+  { key:'sede',                label:'Sede',               def:true },
+  { key:'ciudad',              label:'Ciudad',             def:true },
+  { key:'departamento',        label:'Departamento' },
+  { key:'tipoProyecto',        label:'Tipo de proyecto' },
+  { key:'estado',              label:'Estado',             def:true },
+  { key:'coordinador',         label:'Coordinador',        def:true },
+  { key:'contratista',         label:'Contratista',        def:true },
+  { key:'nCotizacion',         label:'N° cotización' },
+  { key:'fEnvioCot',           label:'Envío cot.',         date:true },
+  { key:'fAprobCot',           label:'Aprob. cot.',        date:true },
+  { key:'fInicioObra',         label:'Inicio obra',        date:true, def:true },
+  { key:'fPruebas',            label:'Pruebas',            date:true },
+  { key:'fEntrega',            label:'Entrega',            date:true, def:true },
+  { key:'tiempoEjecucion',     label:'Días ejec.',         num:true },
+  { key:'avance',              label:'% Avance',           pct:true,  def:true },
+  { key:'fLiquidacion',        label:'Liquidación',        date:true },
+  { key:'fRecepcionOC',        label:'OC recibida',        date:true },
+  { key:'nFactura',            label:'N° factura' },
+  { key:'fEmisionFactura',     label:'Emisión factura',    date:true },
+  { key:'fFacturacionRecaudo', label:'Recaudo',            date:true },
+];
+
+const CR_GROUPS = [
+  { key:'',             label:'Sin agrupar (una sola tabla)' },
+  { key:'estado',       label:'Estado' },
+  { key:'ciudad',       label:'Ciudad' },
+  { key:'departamento', label:'Departamento' },
+  { key:'coordinador',  label:'Coordinador' },
+  { key:'contratista',  label:'Contratista' },
+];
+
+// Valores existentes para un campo, incluyendo la opción "(Sin asignar)"
+// solo cuando de verdad hay proyectos sin ese dato.
+function crOptions(key){
+  const opts = uniqueValues(key).map(v => ({ value:String(v), label:String(v) }));
+  if (projects.some(p => !p[key])) opts.push({ value:CR_EMPTY, label:CR_EMPTY_LABEL });
+  return opts;
+}
+function crValueOf(p, key){
+  const v = p[key];
+  return (v === null || v === undefined || v === '') ? CR_EMPTY : String(v);
+}
+function crLabelOf(value){ return value === CR_EMPTY ? CR_EMPTY_LABEL : value; }
+
+/* ---------- Modal de configuración ---------- */
+function renderCustomReportModal(){
+  const grupo = (title, hint, name, options, checkedAll = true) => `
+    <div class="rep-group">
+      <div class="rep-group-head">
+        <div>
+          <strong>${esc(title)}</strong>
+          ${hint ? `<div class="rep-count">${esc(hint)}</div>` : ''}
+        </div>
+        <div class="rep-group-actions">
+          <button type="button" class="rep-mini-btn" data-action="cr-toggle-all" data-group="${name}" data-value="all">Todos</button>
+          <button type="button" class="rep-mini-btn" data-action="cr-toggle-all" data-group="${name}" data-value="none">Ninguno</button>
+        </div>
+      </div>
+      <div class="rep-check-grid">
+        ${options.map(o => `
+          <label class="rep-check">
+            <input type="checkbox" name="${name}" value="${esc(o.value)}" ${checkedAll ? 'checked' : ''} />
+            <span data-label="${esc(o.label)}">${esc(o.label)}</span>
+          </label>
+        `).join('') || '<p class="rep-count">No hay valores registrados.</p>'}
+      </div>
+    </div>
+  `;
+
+  return `
+  <div class="modal-overlay" data-action="close-custom-report-overlay">
+    <div class="modal-card" data-stop-close>
+      <div class="modal-header">
+        <h2>Reporte personalizado</h2>
+        <button class="modal-close" data-action="close-custom-report">✕</button>
+      </div>
+      <form id="customReportForm" class="modal-form">
+        <p class="auth-note" style="margin:0">
+          Escoge exactamente qué quieres ver en el informe. Lo que no marques queda por fuera del PDF.
+          Si dejas un bloque completo sin marcar, ese criterio no filtra nada (se toman todos).
+          Al elegir un estado o un departamento, las demás listas se ajustan solas para mostrar únicamente
+          lo que aplica — cada opción indica entre paréntesis cuántos proyectos le corresponden hoy.
+        </p>
+
+        <div class="form-grid">
+          <div class="field">
+            <label>Título del reporte</label>
+            <input type="text" name="titulo" value="Reporte personalizado" maxlength="70" />
+          </div>
+          <div class="field">
+            <label>Subtítulo / destinatario (opcional)</label>
+            <input type="text" name="subtitulo" placeholder="Ej.: Presentación a gerencia" maxlength="90" />
+          </div>
+        </div>
+
+        ${grupo('Estados', 'Etapa del proceso en la que está el proyecto.', 'est',
+          STATUSES.map(s => ({ value:s, label:s })))}
+
+        ${grupo('Ciudades', 'Ciudad donde está la tienda.', 'ciu', crOptions('ciudad'))}
+
+        ${grupo('Departamentos', '', 'dep', crOptions('departamento'))}
+
+        ${grupo('Coordinadores', 'Responsable del proyecto dentro de Syntesys.', 'coo', crOptions('coordinador'))}
+
+        ${grupo('Contratistas', '', 'con', crOptions('contratista'))}
+
+        <div class="rep-group">
+          <div class="rep-group-head"><div><strong>Rango de fechas</strong>
+            <div class="rep-count">Se aplica sobre el campo que elijas. Los proyectos sin esa fecha registrada quedan fuera.</div>
+          </div></div>
+          <div class="rep-range">
+            <div class="field" style="margin:0">
+              <label>Filtrar por</label>
+              <select name="dateField">
+                <option value="">Sin filtro de fechas</option>
+                ${CR_DATE_FIELDS.map(f => `<option value="${f.key}">${esc(f.label)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field" style="margin:0">
+              <label>Desde</label>
+              <input type="date" name="desde" />
+            </div>
+            <div class="field" style="margin:0">
+              <label>Hasta</label>
+              <input type="date" name="hasta" />
+            </div>
+          </div>
+        </div>
+
+        <div class="rep-group">
+          <div class="rep-group-head">
+            <div>
+              <strong>Columnas del detalle</strong>
+              <div class="rep-count">Lo que se verá en la tabla de cada proyecto. Entre menos columnas, más legible el PDF.</div>
+            </div>
+            <div class="rep-group-actions">
+              <button type="button" class="rep-mini-btn" data-action="cr-toggle-all" data-group="col" data-value="all">Todas</button>
+              <button type="button" class="rep-mini-btn" data-action="cr-toggle-all" data-group="col" data-value="none">Ninguna</button>
+            </div>
+          </div>
+          <div class="rep-check-grid">
+            ${CR_COLUMNS.map(c => `
+              <label class="rep-check">
+                <input type="checkbox" name="col" value="${c.key}" ${c.def ? 'checked' : ''} />
+                <span>${esc(c.label)}</span>
+              </label>
+            `).join('')}
+          </div>
+        </div>
+
+        <div class="form-grid">
+          <div class="field">
+            <label>Agrupar el detalle por</label>
+            <select name="groupBy">
+              ${CR_GROUPS.map(g => `<option value="${g.key}" ${g.key==='estado'?'selected':''}>${esc(g.label)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label>Orientación de la página</label>
+            <select name="orient">
+              <option value="auto">Automática (según columnas)</option>
+              <option value="portrait">Vertical</option>
+              <option value="landscape">Horizontal</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="rep-group">
+          <div class="rep-group-head"><div><strong>Contenido adicional</strong></div></div>
+          <div class="rep-check-grid">
+            <label class="rep-check"><input type="checkbox" name="incResumen" checked /><span>Resumen por estado</span></label>
+            <label class="rep-check"><input type="checkbox" name="incGrafico" checked /><span>Gráficos de distribución</span></label>
+            <label class="rep-check"><input type="checkbox" name="incObs" /><span>Observaciones de cada proyecto</span></label>
+            <label class="rep-check"><input type="checkbox" name="incFiltros" checked /><span>Hoja de criterios aplicados</span></label>
+          </div>
+        </div>
+
+        <p class="rep-count" id="customReportCount"></p>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-text" data-action="close-custom-report">Cancelar</button>
+          <button type="submit" class="btn btn-primary" data-action="do-custom-report">Generar PDF</button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+}
+
+/* ---------- Lectura de la configuración y filtrado ---------- */
+function readCustomReportConfig(){
+  const form = document.getElementById('customReportForm');
+  if (!form) return null;
+  const fd = new FormData(form);
+  const all = (n) => fd.getAll(n).map(String);
+  const val = (n) => String(fd.get(n) || '').trim();
+  return {
+    titulo: val('titulo') || 'Reporte personalizado',
+    subtitulo: val('subtitulo'),
+    estados: all('est'),
+    ciudades: all('ciu'),
+    departamentos: all('dep'),
+    coordinadores: all('coo'),
+    contratistas: all('con'),
+    dateField: val('dateField'),
+    desde: val('desde'),
+    hasta: val('hasta'),
+    columnas: all('col'),
+    groupBy: val('groupBy'),
+    orient: val('orient') || 'auto',
+    incResumen: !!fd.get('incResumen'),
+    incGrafico: !!fd.get('incGrafico'),
+    incObs: !!fd.get('incObs'),
+    incFiltros: !!fd.get('incFiltros'),
+  };
+}
+
+// Un bloque sin nada marcado se interpreta como "no filtrar por eso": es más
+// intuitivo que devolver cero resultados, y evita informes vacíos por olvido.
+function crMatches(selected, value){
+  return !selected.length || selected.includes(value);
+}
+function filterProjectsForCustomReport(cfg){
+  const desde = cfg.desde ? parseDateSafe(cfg.desde) : null;
+  const hasta = cfg.hasta ? parseDateSafe(cfg.hasta) : null;
+  if (hasta) hasta.setHours(23,59,59,999);
+
+  return projects.filter(p => {
+    if (!crMatches(cfg.estados, String(p.estado || ''))) return false;
+    if (!crMatches(cfg.ciudades, crValueOf(p,'ciudad'))) return false;
+    if (!crMatches(cfg.departamentos, crValueOf(p,'departamento'))) return false;
+    if (!crMatches(cfg.coordinadores, crValueOf(p,'coordinador'))) return false;
+    if (!crMatches(cfg.contratistas, crValueOf(p,'contratista'))) return false;
+    if (cfg.dateField && (desde || hasta)){
+      const d = parseDateSafe(p[cfg.dateField]);
+      if (!d) return false;
+      if (desde && d < desde) return false;
+      if (hasta && d > hasta) return false;
+    }
+    return true;
+  });
+}
+
+// Contador en vivo debajo del formulario: evita generar un PDF vacío y deja
+// ver de inmediato el efecto de cada casilla que se marca o desmarca.
+function updateCustomReportCount(){
+  const el = document.getElementById('customReportCount');
+  if (!el) return;
+  const cfg = readCustomReportConfig();
+  if (!cfg) return;
+  const n = filterProjectsForCustomReport(cfg).length;
+  const cols = cfg.columnas.length;
+  el.innerHTML = n
+    ? `Coinciden <strong>${n}</strong> de ${projects.length} proyectos · ${cols} columna${cols===1?'':'s'} seleccionada${cols===1?'':'s'}.`
+    : `<strong>Ningún proyecto coincide</strong> con los criterios actuales. Ajusta los filtros antes de generar el PDF.`;
+}
+
+/* ---------- Filtros cruzados (cascada) entre Estado, Ciudad, Departamento,
+   Coordinador y Contratista ---------- */
+// Qué campo del proyecto corresponde a cada grupo de casillas del formulario,
+// y con qué propiedad de la configuración se filtra ese campo.
+const CR_CASCADE_GROUPS = [
+  { name:'est', field:'estado',       cfgKey:'estados' },
+  { name:'ciu', field:'ciudad',       cfgKey:'ciudades' },
+  { name:'dep', field:'departamento', cfgKey:'departamentos' },
+  { name:'coo', field:'coordinador',  cfgKey:'coordinadores' },
+  { name:'con', field:'contratista',  cfgKey:'contratistas' },
+];
+// Proyectos que cumplen TODOS los filtros activos (estados, ciudades,
+// departamentos, coordinadores, contratistas y rango de fechas), salvo el del
+// grupo indicado en `exceptGroup` — así se puede ver, para ese grupo, qué
+// valores siguen teniendo sentido dado lo que ya se eligió en los demás.
+function crBuildCrossPool(cfg, exceptGroup){
+  const desde = cfg.desde ? parseDateSafe(cfg.desde) : null;
+  const hasta = cfg.hasta ? parseDateSafe(cfg.hasta) : null;
+  if (hasta) hasta.setHours(23,59,59,999);
+  return projects.filter(p => {
+    for (const g of CR_CASCADE_GROUPS){
+      if (g.name === exceptGroup) continue;
+      if (!crMatches(cfg[g.cfgKey], crValueOf(p, g.field))) return false;
+    }
+    if (cfg.dateField && (desde || hasta)){
+      const d = parseDateSafe(p[cfg.dateField]);
+      if (!d) return false;
+      if (desde && d < desde) return false;
+      if (hasta && d > hasta) return false;
+    }
+    return true;
+  });
+}
+// Recalcula, para cada uno de los 5 grupos, cuántos proyectos le corresponden
+// a cada una de sus opciones dados los demás filtros ya elegidos. Las
+// opciones que se quedan en 0 se desmarcan solas y se ven atenuadas (no
+// aportarían nada al informe); si vuelven a tener proyectos porque se
+// soltó otro filtro, se reactivan automáticamente. Se llama en cada cambio
+// del formulario, así el reporte se arma "en cualquier momento" sin dejar
+// combinaciones vacías a medio marcar.
+function crUpdateCascade(){
+  const form = document.getElementById('customReportForm');
+  if (!form) return;
+  const cfg = readCustomReportConfig();
+  if (!cfg) return;
+  CR_CASCADE_GROUPS.forEach(g => {
+    const pool = crBuildCrossPool(cfg, g.name);
+    const counts = {};
+    pool.forEach(p => { const v = crValueOf(p, g.field); counts[v] = (counts[v]||0) + 1; });
+    form.querySelectorAll(`input[type="checkbox"][name="${g.name}"]`).forEach(cb => {
+      const n = counts[cb.value] || 0;
+      const label = cb.closest('.rep-check');
+      const span = label ? label.querySelector('span[data-label]') : null;
+      if (span) span.textContent = `${span.dataset.label} (${n})`;
+      cb.disabled = n === 0;
+      if (label) label.classList.toggle('rep-check-dim', n === 0);
+      if (n === 0 && cb.checked) cb.checked = false;
+    });
+  });
+  updateCustomReportCount();
+}
+
+/* ---------- Generación del PDF ---------- */
+// Helvetica (la fuente base de jsPDF) no tiene flechas ni triángulos.
+function crPdfSafe(s){
+  return String(s ?? '')
+    .replace(/\u2192/g, '\u203A')
+    .replace(/[\u25B2\u25BC]/g, '')
+    .trim();
+}
+function crCellValue(p, col){
+  const v = p[col.key];
+  if (col.date) return fmtDate(v);
+  if (col.pct)  return `${Math.round(Number(v)||0)}%`;
+  if (v === null || v === undefined || v === '') return '—';
+  return crPdfSafe(v);
+}
+
+function exportCustomReportPDF(){
+  const cfg = readCustomReportConfig();
+  if (!cfg) return;
+  if (!cfg.columnas.length){
+    alert('Selecciona al menos una columna para el detalle del reporte.');
+    return;
+  }
+  const rows = filterProjectsForCustomReport(cfg);
+  if (!rows.length){
+    alert('Ningún proyecto coincide con los criterios seleccionados. Ajusta los filtros e inténtalo de nuevo.');
+    return;
+  }
+
+  return withReportBusy('do-custom-report', 'Generando PDF…', async () => {
+    if (typeof window.jspdf === 'undefined'){
+      alert('No se pudo cargar la librería de PDF. Revisa tu conexión a internet y actualiza la página.');
+      return;
+    }
+
+    const cols = CR_COLUMNS.filter(c => cfg.columnas.includes(c.key));
+    const landscape = cfg.orient === 'landscape' || (cfg.orient === 'auto' && cols.length > 6);
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit:'pt', format:'a4', orientation: landscape ? 'landscape' : 'portrait' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const M = 40;
+    const CW = pageW - M * 2;
+    const BOTTOM = pageH - 56;
+
+    const BLACK  = hexToRgb(REPORT_BRAND.black);
+    const YELLOW = hexToRgb(REPORT_BRAND.yellow);
+    const INK    = hexToRgb(REPORT_BRAND.ink);
+    const MUTED  = hexToRgb(REPORT_BRAND.muted);
+    const LINE   = hexToRgb(REPORT_BRAND.line);
+    const SOFT   = hexToRgb(REPORT_BRAND.soft);
+
+    const tableStyle = {
+      theme:'grid',
+      styles:{ font:'helvetica', fontSize: cols.length > 8 ? 7.5 : 8.6, cellPadding:4.5,
+               textColor:INK, lineColor:LINE, lineWidth:0.5, overflow:'linebreak', valign:'middle' },
+      headStyles:{ fillColor:BLACK, textColor:YELLOW, fontStyle:'bold', fontSize: cols.length > 8 ? 7.8 : 8.8 },
+      alternateRowStyles:{ fillColor:SOFT },
+      margin:{ left:M, right:M },
+    };
+
+    const generatedAt = fmtDateTime(new Date().toISOString());
+    const preparedBy = (currentUser && currentUser.name) ? currentUser.name : '—';
+    const stamp = new Date().toISOString().slice(0,10);
+
+    let y = 0;
+    const ensureSpace = (needed) => { if (y + needed > BOTTOM){ doc.addPage(); y = 52; } };
+    const sectionTitle = (title, note) => {
+      ensureSpace(80);
+      doc.setFillColor(...YELLOW);
+      doc.rect(M, y - 10, 4, 18, 'F');
+      doc.setTextColor(...INK);
+      doc.setFont('helvetica','bold');
+      doc.setFontSize(13.5);
+      doc.text(crPdfSafe(title), M + 12, y + 3);
+      y += 16;
+      if (note){
+        doc.setFont('helvetica','normal');
+        doc.setFontSize(9);
+        doc.setTextColor(...MUTED);
+        const lines = doc.splitTextToSize(crPdfSafe(note), CW);
+        doc.text(lines, M, y + 6);
+        y += lines.length * 11 + 8;
+      }
+      doc.setTextColor(...INK);
+    };
+
+    /* ---- PORTADA ---- */
+    const bandH = landscape ? 190 : 230;
+    doc.setFillColor(...BLACK);
+    doc.rect(0, 0, pageW, bandH, 'F');
+    doc.setFillColor(...YELLOW);
+    doc.rect(0, bandH, pageW, 6, 'F');
+
+    const logo = getBrandLogoPNG();
+    if (logo){
+      const lw = 92;
+      try{ doc.addImage(logo.dataUrl, 'PNG', M, 36, lw, lw * (logo.height / logo.width)); }catch(e){}
+    }
+    doc.setTextColor(...YELLOW);
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(landscape ? 22 : 25);
+    doc.text(crPdfSafe(cfg.titulo), M, bandH - 92, { maxWidth: CW });
+    doc.setTextColor(255,255,255);
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(11.5);
+    doc.text('Syntesys Tecnológica S.A.S — Estado General de Proyectos DC', M, bandH - 66);
+    if (cfg.subtitulo){
+      doc.setFontSize(10.5);
+      doc.setTextColor(...YELLOW);
+      doc.text(crPdfSafe(cfg.subtitulo), M, bandH - 48);
+    }
+    doc.setFontSize(9.5);
+    doc.setTextColor(200,200,195);
+    doc.text(`Generado: ${generatedAt}   ·   Preparado por: ${preparedBy}`, M, bandH - 24);
+
+    /* ---- Indicadores del conjunto filtrado ---- */
+    y = bandH + 46;
+    const avgAvance = Math.round(rows.reduce((s,p)=>s+(Number(p.avance)||0),0) / rows.length);
+    const estadosPresentes = STATUSES.map(st => ({ label:st, n: rows.filter(p=>p.estado===st).length })).filter(e=>e.n>0);
+    const ciudadesPresentes = new Set(rows.map(p => crValueOf(p,'ciudad'))).size;
+
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(13);
+    doc.setTextColor(...INK);
+    doc.text('Resultado de la selección', M, y);
+    y += 14;
+
+    const kpis = [
+      { label:'Proyectos incluidos', value:String(rows.length) },
+      { label:'Del total registrado', value:`${Math.round(rows.length / (projects.length||1) * 100)}%` },
+      { label:'Avance promedio', value:`${avgAvance}%` },
+      { label:'Ciudades', value:String(ciudadesPresentes) },
+    ];
+    const gap = 10;
+    const cardW = (CW - gap * (kpis.length - 1)) / kpis.length;
+    const cardH = 66;
+    kpis.forEach((k,i) => {
+      const x = M + i * (cardW + gap);
+      doc.setFillColor(...SOFT);
+      doc.setDrawColor(...LINE);
+      doc.roundedRect(x, y, cardW, cardH, 6, 6, 'FD');
+      doc.setFillColor(...YELLOW);
+      doc.rect(x, y, 4, cardH, 'F');
+      doc.setTextColor(...MUTED);
+      doc.setFont('helvetica','normal');
+      doc.setFontSize(8.5);
+      doc.text(doc.splitTextToSize(k.label.toUpperCase(), cardW - 18), x + 12, y + 20);
+      doc.setTextColor(...INK);
+      doc.setFont('helvetica','bold');
+      doc.setFontSize(22);
+      doc.text(k.value, x + 12, y + 52);
+    });
+    y += cardH + 28;
+
+    /* ---- Criterios aplicados ---- */
+    if (cfg.incFiltros){
+      const listOrAll = (sel, total) => !sel.length || sel.length === total
+        ? 'Todos'
+        : sel.map(crLabelOf).join(', ');
+      const dateLabel = cfg.dateField
+        ? `${(CR_DATE_FIELDS.find(f=>f.key===cfg.dateField)||{}).label || cfg.dateField}: ${cfg.desde ? fmtDate(cfg.desde) : 'inicio'} a ${cfg.hasta ? fmtDate(cfg.hasta) : 'hoy'}`
+        : 'Sin filtro de fechas';
+      const criterios = [
+        ['Estados', listOrAll(cfg.estados, STATUSES.length)],
+        ['Ciudades', listOrAll(cfg.ciudades, crOptions('ciudad').length)],
+        ['Departamentos', listOrAll(cfg.departamentos, crOptions('departamento').length)],
+        ['Coordinadores', listOrAll(cfg.coordinadores, crOptions('coordinador').length)],
+        ['Contratistas', listOrAll(cfg.contratistas, crOptions('contratista').length)],
+        ['Rango de fechas', dateLabel],
+        ['Agrupado por', (CR_GROUPS.find(g=>g.key===cfg.groupBy)||{}).label || 'Sin agrupar'],
+      ];
+      ensureSpace(140);
+      sectionTitle('Criterios aplicados', 'Deja constancia del alcance exacto de este informe, para que cualquiera pueda reproducirlo después.');
+      doc.autoTable({
+        ...tableStyle,
+        startY: y,
+        head:[['Criterio','Selección']],
+        body: criterios.map(([a,b]) => [a, crPdfSafe(b)]),
+        columnStyles:{ 0:{ cellWidth: 130, fontStyle:'bold' } },
+      });
+      y = doc.lastAutoTable.finalY + 26;
+    }
+
+    /* ---- Resumen por estado + gráficos ---- */
+    const charts = [];
+    if (cfg.incGrafico && estadosPresentes.length){
+      charts.push({
+        key:'estado',
+        title:'Distribución por estado',
+        width:1080, height:Math.max(320, estadosPresentes.length * 46 + 80),
+        config:{
+          type:'bar',
+          data:{
+            labels: estadosPresentes.map(e=>e.label),
+            datasets:[{
+              label:'Proyectos',
+              data: estadosPresentes.map(e=>e.n),
+              backgroundColor: estadosPresentes.map(e => STATUS_COLORS[e.label] || REPORT_BRAND.black),
+              borderRadius:5, borderSkipped:false, maxBarThickness:26,
+            }],
+          },
+          options:{ indexAxis:'y', plugins:{ legend:reportLegend(false), tooltip:{ enabled:false } },
+                    scales:reportScales({ horizontal:true, padRight:14 }) },
+        },
+      });
+    }
+    if (cfg.incGrafico){
+      if (cfg.groupBy && cfg.groupBy !== 'estado'){
+        const counts = {};
+        rows.forEach(p => { const k = crValueOf(p, cfg.groupBy); counts[k] = (counts[k]||0) + 1; });
+        const pairs = Object.entries(counts).sort((a,b) => b[1]-a[1]);
+        const gLabel = (CR_GROUPS.find(g=>g.key===cfg.groupBy)||{}).label || cfg.groupBy;
+        charts.push({
+          key:'grupo',
+          title:`Distribución por ${gLabel.toLowerCase()}`,
+          width:1080, height:Math.max(320, pairs.length * 32 + 80),
+          config:{
+            type:'bar',
+            data:{
+              labels: pairs.map(([k]) => crLabelOf(k)),
+              datasets:[{ label:'Proyectos', data: pairs.map(([,n]) => n),
+                          backgroundColor:'#3B7DD8', borderRadius:5, borderSkipped:false, maxBarThickness:22 }],
+            },
+            options:{ indexAxis:'y', plugins:{ legend:reportLegend(false), tooltip:{ enabled:false } },
+                      scales:reportScales({ horizontal:true, padRight:14 }) },
+          },
+        });
+      }
+      for (const spec of charts){
+        spec.dataUrl = await renderReportChartImage(spec);
+      }
+    }
+
+    if (cfg.incResumen){
+      doc.addPage(); y = 52;
+      sectionTitle('Resumen por estado', 'Cantidad de proyectos incluidos en el reporte, por etapa del proceso.');
+      doc.autoTable({
+        ...tableStyle,
+        startY: y,
+        head:[['Estado','Proyectos','Participación']],
+        body: estadosPresentes.map(e => [e.label, e.n, `${Math.round(e.n / rows.length * 100)}%`]),
+        foot:[['TOTAL', rows.length, '100%']],
+        footStyles:{ fillColor:[235,232,223], textColor:INK, fontStyle:'bold' },
+        columnStyles:{ 1:{ halign:'center' }, 2:{ halign:'center' } },
+      });
+      y = doc.lastAutoTable.finalY + 24;
+    }
+
+    const addChart = (spec) => {
+      if (!spec || !spec.dataUrl) return;
+      let w = CW;
+      let h = spec.height * (w / spec.width);
+      const maxH = BOTTOM - 62;
+      if (h > maxH){ h = maxH; w = spec.width * (h / spec.height); }
+      if (y + h > BOTTOM){ doc.addPage(); y = 52; }
+      try{
+        doc.addImage(spec.dataUrl, 'PNG', M + (CW - w) / 2, y, w, h, undefined, 'FAST');
+        y += h + 20;
+      }catch(err){ console.error('No se pudo incrustar el gráfico', err); }
+    };
+    charts.forEach(spec => {
+      if (!spec.dataUrl) return;
+      doc.addPage(); y = 52;
+      sectionTitle(spec.title, '');
+      addChart(spec);
+    });
+
+    /* ---- Detalle de proyectos ---- */
+    const head = [cols.map(c => c.label)];
+    const bodyOf = (list) => list.map(p => cols.map(c => crCellValue(p, c)));
+    const estadoColIndex = cols.findIndex(c => c.key === 'estado');
+    const commonTable = {
+      ...tableStyle,
+      head,
+      didParseCell: (hook) => {
+        if (hook.section === 'body' && estadoColIndex >= 0 && hook.column.index === estadoColIndex){
+          const color = STATUS_COLORS[String(hook.cell.raw)];
+          if (color){
+            hook.cell.styles.textColor = hexToRgb(color);
+            hook.cell.styles.fontStyle = 'bold';
+          }
+        }
+      },
+    };
+
+    doc.addPage(); y = 52;
+    sectionTitle('Detalle de proyectos', `${rows.length} proyecto${rows.length===1?'':'s'} que cumplen los criterios seleccionados.`);
+
+    const sortByName = (a,b) => String(a.cliente||'').localeCompare(String(b.cliente||'')) ||
+                                String(a.sede||'').localeCompare(String(b.sede||''));
+
+    if (cfg.groupBy){
+      // Al agrupar por estado se conserva el orden natural del proceso; en
+      // los demás casos se ordena por cantidad, de mayor a menor.
+      const groups = {};
+      rows.forEach(p => {
+        const k = crValueOf(p, cfg.groupBy);
+        (groups[k] = groups[k] || []).push(p);
+      });
+      let keys = Object.keys(groups);
+      keys = cfg.groupBy === 'estado'
+        ? STATUSES.filter(s => keys.includes(s)).concat(keys.filter(k => !STATUSES.includes(k)))
+        : keys.sort((a,b) => groups[b].length - groups[a].length || String(a).localeCompare(String(b)));
+
+      keys.forEach(k => {
+        const items = groups[k].slice().sort(sortByName);
+        ensureSpace(90);
+        // Franja de encabezado del grupo, con el color del estado cuando aplica.
+        const accent = cfg.groupBy === 'estado' && STATUS_COLORS[k] ? hexToRgb(STATUS_COLORS[k]) : YELLOW;
+        doc.setFillColor(...BLACK);
+        doc.rect(M, y - 2, CW, 22, 'F');
+        doc.setFillColor(...accent);
+        doc.rect(M, y - 2, 5, 22, 'F');
+        doc.setTextColor(255,255,255);
+        doc.setFont('helvetica','bold');
+        doc.setFontSize(10.5);
+        doc.text(crPdfSafe(crLabelOf(k)), M + 14, y + 13);
+        doc.setTextColor(...YELLOW);
+        doc.text(`${items.length} proyecto${items.length===1?'':'s'}`, pageW - M - 8, y + 13, { align:'right' });
+        y += 28;
+        doc.autoTable({ ...commonTable, startY: y, body: bodyOf(items) });
+        y = doc.lastAutoTable.finalY + 22;
+      });
+    } else {
+      doc.autoTable({ ...commonTable, startY: y, body: bodyOf(rows.slice().sort(sortByName)) });
+      y = doc.lastAutoTable.finalY + 22;
+    }
+
+    /* ---- Observaciones ---- */
+    if (cfg.incObs){
+      const conObs = rows.filter(p => String(p.observaciones || '').trim());
+      if (conObs.length){
+        doc.addPage(); y = 52;
+        sectionTitle('Observaciones registradas', 'Notas de seguimiento escritas por el equipo en cada proyecto.');
+        conObs.sort(sortByName).forEach(p => {
+          const titulo = crPdfSafe(`${p.cliente || 'Proyecto'} — ${p.sede || ''} (${p.ciudad || '—'})`);
+          const texto = doc.splitTextToSize(crPdfSafe(p.observaciones), CW - 18);
+          ensureSpace(texto.length * 10.5 + 44);
+          doc.setFont('helvetica','bold');
+          doc.setFontSize(10);
+          doc.setTextColor(...INK);
+          doc.text(titulo, M, y);
+          y += 6;
+          doc.setDrawColor(...LINE);
+          doc.line(M, y, pageW - M, y);
+          y += 12;
+          doc.setFont('helvetica','normal');
+          doc.setFontSize(9);
+          doc.setTextColor(...MUTED);
+          doc.text(texto, M, y);
+          y += texto.length * 10.5 + 16;
+          doc.setTextColor(...INK);
+        });
+      }
+    }
+
+    /* ---- Pie de página ---- */
+    const totalPages = doc.internal.getNumberOfPages();
+    for (let i = 2; i <= totalPages; i++){
+      doc.setPage(i);
+      doc.setDrawColor(...LINE);
+      doc.setLineWidth(0.5);
+      doc.line(M, pageH - 42, pageW - M, pageH - 42);
+      doc.setFont('helvetica','normal');
+      doc.setFontSize(8);
+      doc.setTextColor(...MUTED);
+      doc.text(crPdfSafe(`Syntesys Tecnológica S.A.S — ${cfg.titulo} · Documento interno`), M, pageH - 28);
+      doc.text(`Página ${i} de ${totalPages}`, pageW - M, pageH - 28, { align:'right' });
+    }
+
+    const slug = cfg.titulo.normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+      .replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,40) || 'Reporte_personalizado';
+    doc.save(`${slug}_${stamp}.pdf`);
+    logChange({ project:'—', text:`Generó el reporte personalizado "${cfg.titulo}" en PDF (${rows.length} proyecto(s)).` });
+    customReportState = null;
+    render();
+  });
 }
 
 function exportExcel(){

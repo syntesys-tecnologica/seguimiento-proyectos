@@ -819,6 +819,19 @@ function mesDeFecha(v){
   const d = parseDateSafe(v);
   return d ? MESES_ES[d.getMonth()] : '';
 }
+// "Fin de garantía" se PROPONE solo: un año después de la fecha de entrega al
+// cliente (cuando empieza la garantía), cada vez que esa fecha cambia; pero se
+// puede editar a mano. Un 29 de febrero cae al 28 de febrero del año siguiente.
+// Si se borra la fecha de entrega, el fin de garantía también se borra.
+function finGarantiaDeFecha(v){
+  const d = parseDateSafe(v);
+  if (!d) return '';
+  const y = d.getFullYear() + 1, m = d.getMonth();
+  let day = d.getDate();
+  const lastDay = new Date(y, m + 1, 0).getDate();
+  if (day > lastDay) day = lastDay;
+  return `${y}-${String(m + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+}
 function syncMesConEntrega(){
   const form = document.getElementById('projectForm');
   if (!form) return;
@@ -826,6 +839,8 @@ function syncMesConEntrega(){
   const mesInput = form.querySelector('[name="mes"]');
   if (!entregaInput || !mesInput) return;
   mesInput.value = mesDeFecha(entregaInput.value);
+  const finInput = form.querySelector('[name="fFinGarantia"]');
+  if (finInput) finInput.value = finGarantiaDeFecha(entregaInput.value);
 }
 function nextId(){
   return projects.reduce((m,p)=>Math.max(m,p.id||0),0)+1;
@@ -2390,6 +2405,20 @@ function renderField(f, d, readOnly){
         <textarea name="${f.key}" rows="3" ${dis}>${esc(val)}</textarea>
       </div>`;
   }
+  if (f.key === 'fFinGarantia'){
+    // Se propone solo (entrega + 1 año) cada vez que cambia la fecha de
+    // entrega, pero sigue siendo EDITABLE: la persona puede cambiarla a mano.
+    const finVal = val || finGarantiaDeFecha(d.fEntrega);
+    return `
+      <div class="field">
+        <label>${f.label}</label>
+        <div class="date-field-row">
+          <input type="date" name="${f.key}" value="${esc(finVal)}" ${dis} />
+          ${readOnly ? '' : `<button type="button" class="btn btn-text btn-clear-date" data-action="clear-date" data-target="${f.key}" title="Borrar esta fecha">Borrar fecha ✕</button>`}
+        </div>
+        <p class="field-hint">Se llena solo (un año después de la entrega al cliente); también puedes editarla.</p>
+      </div>`;
+  }
   if (f.type === 'date'){
     return `
       <div class="field">
@@ -3277,7 +3306,11 @@ async function saveProject(form){
   // "Mes" y "Tipo de ciudad" siempre se guardan en MAYÚSCULA.
   ['mes','tipoCiudad'].forEach(k => { draft[k] = String(draft[k] || '').trim().toUpperCase(); });
   // El mes NO se ingresa a mano: sale de la fecha de entrega al cliente.
-  if (draft.fEntrega) draft.mes = mesDeFecha(draft.fEntrega);
+  if (draft.fEntrega){
+    draft.mes = mesDeFecha(draft.fEntrega);
+    // Fin de garantía es editable: solo se completa si quedó vacío.
+    if (!draft.fFinGarantia) draft.fFinGarantia = finGarantiaDeFecha(draft.fEntrega);
+  }
   draft.avance = computeAvance(draft);
   draft.lastModifiedBy = currentUser.name;
   draft.lastModifiedAt = new Date().toISOString();
@@ -3685,6 +3718,7 @@ function drawGanttPDF(doc, projectList){
   const monthNames = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
 
   const gMarginX = 40, labelColW = 190, rowH = 16, topOffset = 142, bottomMargin = 36;
+  const brandLogo = getBrandLogoPNG();
   let pw, ph, timelineLeft, timelineRight;
   const xOf = (d) => timelineLeft + ((d - minDate) / spanMs) * (timelineRight - timelineLeft);
   // Rombo (hito de recaudo) centrado en (cx,cy) con "radio" r.
@@ -3711,6 +3745,7 @@ function drawGanttPDF(doc, projectList){
     doc.text('Syntesys Tecnológica S.A.S — Estado General de Proyectos DC', gMarginX, 48);
     doc.setFontSize(9);
     doc.text(`Generado el ${fmtDateTime(new Date().toISOString())}${pageNum>1 ? ` · continuación (página ${pageNum} del diagrama)` : ''}`, gMarginX, 62);
+    addLogoToBand(doc, brandLogo, pw, gMarginX, 70, 54);
 
     // Leyenda: un cuadro (o rombo, para RECAUDADO) por cada estado, con el
     // mismo color que ese estado tiene en el resto de la app. Va en su propia
@@ -3869,6 +3904,14 @@ function renderGanttImage(projectList){
   ctx.fillText('Diagrama de Gantt — proyección por fechas de estado', gMarginX, 22);
   ctx.font = '9px Helvetica, Arial, sans-serif';
   ctx.fillText('Syntesys Tecnológica S.A.S — Estado General de Proyectos DC', gMarginX, 37);
+  // Logo al lado derecho de la banda negra.
+  try{
+    const logoImg = document.querySelector('.topbar-logo');
+    if (logoImg && logoImg.complete && logoImg.naturalWidth){
+      const lh = 38, lw = lh * (logoImg.naturalWidth / logoImg.naturalHeight);
+      ctx.drawImage(logoImg, cw - gMarginX - lw, (46 - lh) / 2, lw, lh);
+    }
+  }catch(e){}
 
   // Leyenda: un cuadro (o rombo, para RECAUDADO) por cada estado, con el
   // mismo color que ese estado tiene en el resto de la app. Va en su propia
@@ -3968,6 +4011,15 @@ function renderGanttImage(projectList){
   });
 }
 
+// Pone el logo de Syntesys al lado DERECHO de una banda negra de encabezado
+// (mismo criterio que el Reporte ejecutivo), centrado verticalmente en ella.
+function addLogoToBand(doc, logo, pageW, marginX, bandH, maxH){
+  if (!logo) return;
+  const lh = Math.min(maxH, bandH - 16);
+  const lw = lh * (logo.width / logo.height);
+  try{ doc.addImage(logo.dataUrl, 'PNG', pageW - marginX - lw, (bandH - lh) / 2, lw, lh); }catch(e){}
+}
+
 function exportMapaPDF(){
   if (typeof window.jspdf === 'undefined'){
     alert('No se pudo cargar la librería de PDF. Revisa tu conexión a internet y actualiza la página.');
@@ -3990,6 +4042,7 @@ function exportMapaPDF(){
   doc.text('Syntesys Tecnológica S.A.S — Estado General de Proyectos DC', marginX, 48);
   doc.setFontSize(9);
   doc.text(`Generado el ${fmtDateTime(new Date().toISOString())}`, marginX, 62);
+  addLogoToBand(doc, getBrandLogoPNG(), pageWidth, marginX, 70, 54);
   y = 100;
 
   const tableStyle = {
@@ -4055,16 +4108,43 @@ async function exportMapaDOCX(){
     alert('No se pudo cargar la librería de Word. Revisa tu conexión a internet y actualiza la página.');
     return;
   }
-  const { Document, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, ShadingType, HeadingLevel, ImageRun, Packer, AlignmentType } = window.docx;
+  const { Document, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, ShadingType, HeadingLevel, ImageRun, Packer, AlignmentType, BorderStyle, VerticalAlign } = window.docx;
 
   const darkShading = { fill:'141414', type:ShadingType.CLEAR, color:'auto' };
   const headCell = (text) => new TableCell({ shading:darkShading, children:[ new Paragraph({ alignment:AlignmentType.CENTER, children:[ new TextRun({ text, bold:true, color:'F6D500', size:19 }) ] }) ] });
   const bodyCell = (text) => new TableCell({ children:[ new Paragraph({ children:[ new TextRun({ text:String(text ?? '—'), size:18 }) ] }) ] });
 
+  // Encabezado: banda negra con el título a la izquierda y el logo de
+  // Syntesys a la derecha (mismo estilo que el PDF y el Reporte ejecutivo).
+  const logo = getBrandLogoPNG();
+  const logoBuf = logo ? await (await fetch(logo.dataUrl)).arrayBuffer() : null;
+  const noBorder = { style:BorderStyle.NONE, size:0, color:'141414' };
+  const noBorders = { top:noBorder, bottom:noBorder, left:noBorder, right:noBorder };
+  const headerTable = new Table({
+    width:{ size:100, type:WidthType.PERCENTAGE },
+    rows:[ new TableRow({ children:[
+      new TableCell({
+        width:{ size:80, type:WidthType.PERCENTAGE }, shading:darkShading, borders:noBorders,
+        verticalAlign:VerticalAlign.CENTER, margins:{ top:160, bottom:160, left:240, right:120 },
+        children:[
+          new Paragraph({ children:[ new TextRun({ text:'Informe de estado de proyectos', bold:true, size:32, color:'FFFFFF' }) ] }),
+          new Paragraph({ children:[ new TextRun({ text:'Syntesys Tecnológica S.A.S — Estado General de Proyectos DC', size:18, color:'FFFFFF' }) ] }),
+          new Paragraph({ children:[ new TextRun({ text:`Generado el ${fmtDateTime(new Date().toISOString())}`, size:16, color:'C8C8C3' }) ] }),
+        ],
+      }),
+      new TableCell({
+        width:{ size:20, type:WidthType.PERCENTAGE }, shading:darkShading, borders:noBorders,
+        verticalAlign:VerticalAlign.CENTER, margins:{ top:120, bottom:120, left:120, right:240 },
+        children:[ new Paragraph({
+          alignment:AlignmentType.RIGHT,
+          children: logoBuf ? [ new ImageRun({ data:logoBuf, transformation:{ width:Math.round(64 * (logo.width/logo.height)), height:64 } }) ] : [],
+        }) ],
+      }),
+    ] }) ],
+  });
   const children = [
-    new Paragraph({ children:[ new TextRun({ text:'Informe de estado de proyectos', bold:true, size:32 }) ] }),
-    new Paragraph({ children:[ new TextRun({ text:'Syntesys Tecnológica S.A.S — Estado General de Proyectos DC', size:18, color:'5A5A54' }) ] }),
-    new Paragraph({ children:[ new TextRun({ text:`Generado el ${fmtDateTime(new Date().toISOString())}`, size:16, color:'6B6B63' }) ], spacing:{ after:200 } }),
+    headerTable,
+    new Paragraph({ text:'', spacing:{ after:200 } }),
     new Paragraph({ heading:HeadingLevel.HEADING_1, children:[ new TextRun('Cantidad de proyectos por estado') ] }),
   ];
 

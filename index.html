@@ -561,7 +561,7 @@ const STATUS_COLORS = {
   'RECAUDADO':         '#141414'
 };
 
-const TIPO_CIUDAD_OPTIONS = ['Principal','Secundaria','Resto del pais'];
+const TIPO_CIUDAD_OPTIONS = ['PRINCIPAL','SECUNDARIA','RESTO DEL PAIS'];
 
 const FIELD_GROUPS = [
   { key:'general', title:'Información general', fields:[
@@ -809,6 +809,23 @@ function recalcTiempoEjecucion(){
   if (inicio && entrega && entrega >= inicio){
     tiempoInput.value = Math.round((entrega - inicio) / 86400000);
   }
+}
+// El campo "Mes" es AUTOMÁTICO y de solo lectura: siempre refleja el mes de
+// la fecha de entrega al cliente, en MAYÚSCULA y en español ("ENERO",
+// "JUNIO"…). No se escribe a mano. Si la fecha de entrega se borra, el mes
+// también se borra.
+const MESES_ES = ['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE'];
+function mesDeFecha(v){
+  const d = parseDateSafe(v);
+  return d ? MESES_ES[d.getMonth()] : '';
+}
+function syncMesConEntrega(){
+  const form = document.getElementById('projectForm');
+  if (!form) return;
+  const entregaInput = form.querySelector('[name="fEntrega"]');
+  const mesInput = form.querySelector('[name="mes"]');
+  if (!entregaInput || !mesInput) return;
+  mesInput.value = mesDeFecha(entregaInput.value);
 }
 function nextId(){
   return projects.reduce((m,p)=>Math.max(m,p.id||0),0)+1;
@@ -2362,7 +2379,7 @@ function renderField(f, d, readOnly){
         <label>${f.label}</label>
         <select name="${f.key}" ${dis}>
           <option value="">—</option>
-          ${f.options.map(o=>`<option value="${esc(o)}" ${val===o?'selected':''}>${esc(o)}</option>`).join('')}
+          ${f.options.map(o=>`<option value="${esc(o)}" ${String(val).toUpperCase()===String(o).toUpperCase()?'selected':''}>${esc(o)}</option>`).join('')}
         </select>
       </div>`;
   }
@@ -2397,6 +2414,18 @@ function renderField(f, d, readOnly){
         </div>
         <p class="field-hint">Se calcula solo (entrega − inicio de obra); también puedes escribirlo a mano.</p>
       </div>`;
+  }
+  if (f.key === 'mes'){
+    // Automático: sale de la fecha de entrega al cliente (mesDeFecha). Si el
+    // proyecto todavía no tiene fecha de entrega se muestra el valor que ya
+    // tuviera guardado. Es readonly (no disabled) para que igual se guarde.
+    const mesVal = mesDeFecha(d.fEntrega) || String(val).toUpperCase();
+    return `
+    <div class="field">
+      <label>${f.label}</label>
+      <input type="text" name="${f.key}" value="${esc(mesVal)}" readonly tabindex="-1" style="background:#f3f2ec;cursor:not-allowed" />
+      <p class="field-hint">Automático: toma el mes de la fecha de entrega al cliente.</p>
+    </div>`;
   }
   return `
     <div class="field">
@@ -3006,6 +3035,8 @@ function onRootInput(e){
     // El tiempo de ejecución se recalcula solo cada vez que cambia la fecha
     // de inicio real de obra o la fecha de entrega al cliente.
     recalcTiempoEjecucion();
+    // El mes se relaciona solo con la fecha de entrega al cliente.
+    if (e.target.matches('[name="fEntrega"]')) syncMesConEntrega();
     return;
   }
   if (e.target.matches('[data-filter="search"]')){
@@ -3243,6 +3274,10 @@ async function saveProject(form){
     draft[f.key] = fd.get(f.key) ?? '';
   }));
   ['tuberia','cableado','equipos'].forEach(k => { draft[k] = Number(fd.get(k))||0; });
+  // "Mes" y "Tipo de ciudad" siempre se guardan en MAYÚSCULA.
+  ['mes','tipoCiudad'].forEach(k => { draft[k] = String(draft[k] || '').trim().toUpperCase(); });
+  // El mes NO se ingresa a mano: sale de la fecha de entrega al cliente.
+  if (draft.fEntrega) draft.mes = mesDeFecha(draft.fEntrega);
   draft.avance = computeAvance(draft);
   draft.lastModifiedBy = currentUser.name;
   draft.lastModifiedAt = new Date().toISOString();
@@ -3258,7 +3293,10 @@ async function saveProject(form){
     const old = projects[idx];
     const changes = [];
     FIELD_GROUPS.forEach(g => g.fields.forEach(f => {
-      if (String(old[f.key]||'') !== String(draft[f.key]||'')){
+      const same = (f.key === 'mes' || f.key === 'tipoCiudad')
+        ? String(old[f.key]||'').toUpperCase() === String(draft[f.key]||'').toUpperCase()
+        : String(old[f.key]||'') === String(draft[f.key]||'');
+      if (!same){
         changes.push(`${f.label}: "${old[f.key]||'—'}" → "${draft[f.key]||'—'}"`);
       }
     }));

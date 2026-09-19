@@ -1960,12 +1960,12 @@ function renderAnalisis(){
     <section class="panel">
       <div class="toolbar">
         <div>
-          <h3 class="chart-title" style="margin-bottom:2px">Reporte ejecutivo mensual</h3>
-          <p class="auth-note">Descarga el informe completo para gerencia —resumen ejecutivo, comparativo semanal, estado de los proyectos, tiempos entre etapas, ciudades y contratistas— con los mismos gráficos de esta pestaña incluidos. En Excel quedan además las tablas de datos editables; en PDF, un documento listo para presentar o enviar.</p>
+          <h3 class="chart-title" style="margin-bottom:2px">Reporte ejecutivo</h3>
+          <p class="auth-note">Descarga el informe completo, comparativo semanal, estado de los proyectos, tiempos entre etapas, ciudades y contratistas— con los mismos gráficos de esta pestaña incluidos. En Excel quedan además las tablas de datos editables; en PDF, un documento listo para presentar o enviar.</p>
         </div>
         <div class="toolbar-right">
-          <button class="btn btn-outline" data-action="export-monthly-report">Descargar reporte mensual (Excel)</button>
-          <button class="btn btn-primary" data-action="export-monthly-report-pdf">Descargar reporte mensual (PDF)</button>
+          <button class="btn btn-outline" data-action="export-monthly-report">Descargar reporte(Excel)</button>
+          <button class="btn btn-primary" data-action="export-monthly-report-pdf">Descargar reporte(PDF)</button>
         </div>
       </div>
 
@@ -4524,7 +4524,7 @@ function exportMonthlyReport(){
     const cover = wsPortada.getCell('A1');
     cover.value = {
       richText:[
-        { text:'REPORTE EJECUTIVO MENSUAL\n', font:{ size:20, bold:true, color: xlColor(REPORT_BRAND.yellow), name:'Calibri' } },
+        { text:'REPORTE EJECUTIVO\n', font:{ size:20, bold:true, color: xlColor(REPORT_BRAND.yellow), name:'Calibri' } },
         { text:'Syntesys Tecnológica S.A.S — Estado General de Proyectos DC', font:{ size:11, color: xlColor(REPORT_BRAND.white), name:'Calibri' } },
       ],
     };
@@ -4643,7 +4643,7 @@ function exportMonthlyReport(){
     const buffer = await wb.xlsx.writeBuffer();
     downloadBlob(new Blob([buffer], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
       `Reporte_Ejecutivo_DC_${data.stamp}.xlsx`);
-    logChange({ project:'—', text:`Descargó el reporte ejecutivo mensual con gráficos en Excel (${data.monthLabel}).` });
+    logChange({ project:'—', text:`Descargó el reporte ejecutivo con gráficos en Excel (${data.monthLabel}).` });
   });
 }
 
@@ -4684,10 +4684,10 @@ function exportMonthlyReportPlain(data){
   XLSX.utils.book_append_sheet(wb, wsTiempos, 'Tiempos entre etapas');
 
   XLSX.writeFile(wb, `Reporte_Ejecutivo_DC_${data.stamp}.xlsx`);
-  logChange({ project:'—', text:`Descargó el reporte ejecutivo mensual (${data.monthLabel}).` });
+  logChange({ project:'—', text:`Descargó el reporte ejecutivo (${data.monthLabel}).` });
 }
 
-/* ---------- Reporte ejecutivo mensual en PDF ---------- */
+/* ---------- Reporte ejecutivo en PDF ---------- */
 function exportMonthlyReportPDF(){
   return withReportBusy('export-monthly-report-pdf', 'Generando PDF…', async () => {
     if (typeof window.jspdf === 'undefined'){
@@ -4747,7 +4747,7 @@ function exportMonthlyReportPDF(){
     doc.setTextColor(...YELLOW);
     doc.setFont('helvetica','bold');
     doc.setFontSize(26);
-    doc.text('Reporte ejecutivo mensual', M, 160);
+    doc.text('Reporte ejecutivo', M, 160);
     doc.setTextColor(255,255,255);
     doc.setFont('helvetica','normal');
     doc.setFontSize(12);
@@ -4981,12 +4981,12 @@ function exportMonthlyReportPDF(){
       doc.setFont('helvetica','normal');
       doc.setFontSize(8);
       doc.setTextColor(...MUTED);
-      doc.text('Syntesys Tecnológica S.A.S — Reporte ejecutivo mensual · Documento interno', M, pageH - 30);
+      doc.text('Syntesys Tecnológica S.A.S — Reporte ejecutivo · Documento interno', M, pageH - 30);
       doc.text(`Página ${i} de ${total}`, pageW - M, pageH - 30, { align:'right' });
     }
 
     doc.save(`Reporte_Ejecutivo_DC_${data.stamp}.pdf`);
-    logChange({ project:'—', text:`Descargó el reporte ejecutivo mensual en PDF (${data.monthLabel}).` });
+    logChange({ project:'—', text:`Descargó el reporte ejecutivo en PDF (${data.monthLabel}).` });
   });
 }
 

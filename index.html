@@ -3517,7 +3517,8 @@ function hexToRgb(hex){
 //    FINALIZADA      entrega al cliente       → liquidación al cliente
 //    OC SOLICITADA   liquidación al cliente   → emisión de factura
 //                    (si el proyecto está hoy en LIQUIDADA, ver ganttSegments)
-//    FACTURADA       emisión de factura       → facturación de recaudo
+//    FACTURADA       emisión de factura       → facturación de recaudo (si ya está
+//                    RECAUDADO, este tramo se pinta en negro: tiempo real de recaudo)
 //    RECAUDADO       facturación de recaudo   → hito final (rombo, sin duración)
 const GANTT_PHASES = [
   { key:'proceso',    estado:'EN PROCESO',    from:'fInicioObra',     to:'fEntrega' },
@@ -3531,8 +3532,8 @@ const GANTT_PHASES = [
 const GANTT_LEGEND_ESTADOS = ['EN PROCESO','FINALIZADA','LIQUIDADA','OC SOLICITADA','FACTURADA','RECAUDADO'];
 const GANTT_CAPTION_LINES = [
   'Cada color es el estado del proyecto durante ese período: EN PROCESO (de inicio de obra a entrega) · FINALIZADA (de entrega a liquidación).',
-  'OC SOLICITADA (de liquidación a emisión de factura; LIQUIDADA si hoy el proyecto está en ese estado) · FACTURADA (de emisión de factura a facturación de recaudo).',
-  'El rombo marca la fecha de recaudo y la barra del estado actual se extiende hasta la línea de "Hoy".',
+  'OC SOLICITADA (de liquidación a emisión de factura; LIQUIDADA si hoy el proyecto está en ese estado) · FACTURADA (de emisión de factura hasta el recaudo, o hasta hoy si aún no se recauda).',
+  'RECAUDADO (barra negra): tiempo real entre la facturación y la fecha de recaudo, cerrado con un rombo. La barra del estado actual se extiende hasta la línea de "Hoy".',
 ];
 // Color [r,g,b] de un estado, idéntico al que se usa en chips, mapa y gráficos.
 function ganttColor(estado){ return hexToRgb(STATUS_COLORS[estado] || '#8c8c86'); }
@@ -3573,7 +3574,12 @@ function ganttSegments(p, today){
   GANTT_PHASES.forEach(ph => {
     const from = parseDateSafe(p[ph.from]);
     if (!from) return;
-    const estado = (ph.key === 'oc' && p.estado === 'LIQUIDADA') ? 'LIQUIDADA' : ph.estado;
+    // Si el proyecto ya está RECAUDADO, el tramo emisión de factura → recaudo
+    // se pinta con el color negro de RECAUDADO (tiempo real que tardó el
+    // recaudo); mientras no se recaude, ese mismo tramo se ve como FACTURADA.
+    const estado = (ph.key === 'oc' && p.estado === 'LIQUIDADA') ? 'LIQUIDADA'
+                 : (ph.key === 'facturada' && p.estado === 'RECAUDADO') ? 'RECAUDADO'
+                 : ph.estado;
     let to = parseDateSafe(p[ph.to]);
     let open = false;
     if (!to){
@@ -3951,7 +3957,7 @@ function exportMapaPDF(){
   const tableStyle = {
     theme:'grid',
     styles:{ font:'helvetica', fontSize:9.5, cellPadding:5, textColor:[20,20,20], lineColor:[228,225,214] },
-    headStyles:{ fillColor:[20,20,20], textColor:[246,213,0], fontStyle:'bold', fontSize:10 },
+    headStyles:{ fillColor:[20,20,20], textColor:[246,213,0], fontStyle:'bold', fontSize:10, halign:'center' },
     margin:{ left:marginX, right:marginX },
   };
 
@@ -4011,10 +4017,10 @@ async function exportMapaDOCX(){
     alert('No se pudo cargar la librería de Word. Revisa tu conexión a internet y actualiza la página.');
     return;
   }
-  const { Document, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, ShadingType, HeadingLevel, ImageRun, Packer } = window.docx;
+  const { Document, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, ShadingType, HeadingLevel, ImageRun, Packer, AlignmentType } = window.docx;
 
   const darkShading = { fill:'141414', type:ShadingType.CLEAR, color:'auto' };
-  const headCell = (text) => new TableCell({ shading:darkShading, children:[ new Paragraph({ children:[ new TextRun({ text, bold:true, color:'F6D500', size:19 }) ] }) ] });
+  const headCell = (text) => new TableCell({ shading:darkShading, children:[ new Paragraph({ alignment:AlignmentType.CENTER, children:[ new TextRun({ text, bold:true, color:'F6D500', size:19 }) ] }) ] });
   const bodyCell = (text) => new TableCell({ children:[ new Paragraph({ children:[ new TextRun({ text:String(text ?? '—'), size:18 }) ] }) ] });
 
   const children = [
@@ -4463,7 +4469,7 @@ function exportMonthlyReport(){
         cell.value = v;
         cell.font = { name:'Calibri', size:11, bold:true, color: xlColor(REPORT_BRAND.yellow) };
         cell.fill = { type:'pattern', pattern:'solid', fgColor: xlColor(REPORT_BRAND.black) };
-        cell.alignment = { vertical:'middle', horizontal: i===0 ? 'left' : 'center', wrapText:true };
+        cell.alignment = { vertical:'middle', horizontal:'center', wrapText:true };
         cell.border = { bottom:{ style:'thin', color: xlColor(REPORT_BRAND.yellow) } };
       });
       row.height = 24;
@@ -4475,7 +4481,7 @@ function exportMonthlyReport(){
         const cell = row.getCell(i+1);
         cell.value = v;
         cell.font = { name:'Calibri', size:11, bold: !!opts.bold, color: xlColor(REPORT_BRAND.ink) };
-        cell.alignment = { vertical:'middle', horizontal: i===0 ? 'left' : 'center' };
+        cell.alignment = { vertical:'middle', horizontal: (i===0 && !opts.center) ? 'left' : 'center' };
         cell.border = {
           top:{ style:'hair', color: xlColor(REPORT_BRAND.line) },
           bottom:{ style:'hair', color: xlColor(REPORT_BRAND.line) },
@@ -4498,7 +4504,7 @@ function exportMonthlyReport(){
       }));
       const totalRow = startRow + rows.length;
       if (opts.total){
-        bodyRow(ws, totalRow + 1, opts.total, { bold:true });
+        bodyRow(ws, totalRow + 1, opts.total, { bold:true, center:true });
         return totalRow + 1;
       }
       return totalRow;
@@ -4580,7 +4586,7 @@ function exportMonthlyReport(){
       ? `Punto de atención: el mayor cuello de botella del proceso es "${data.bottleneck.label}", con un promedio real de ${data.bottleneck.avg} días. La semana en curso todavía no termina, así que sus totales pueden verse más bajos solo porque faltan días por contar.`
       : 'La semana en curso todavía no termina, así que sus totales pueden verse más bajos solo porque faltan días por contar.';
     note.font = { name:'Calibri', size:10, italic:true, color: xlColor(REPORT_BRAND.ink) };
-    note.alignment = { vertical:'top', horizontal:'left', wrapText:true, indent:1 };
+    note.alignment = { vertical:'top', horizontal:'justify', wrapText:true, indent:1 };
     note.fill = { type:'pattern', pattern:'solid', fgColor: xlColor('#FDF6C9') };
     wsPortada.getRow(r).height = 46;
 
@@ -4716,7 +4722,7 @@ function exportMonthlyReportPDF(){
     const tableStyle = {
       theme:'grid',
       styles:{ font:'helvetica', fontSize:9.5, cellPadding:6, textColor:INK, lineColor:LINE, lineWidth:0.5 },
-      headStyles:{ fillColor:BLACK, textColor:YELLOW, fontStyle:'bold', fontSize:10 },
+      headStyles:{ fillColor:BLACK, textColor:YELLOW, fontStyle:'bold', fontSize:10, halign:'center' },
       alternateRowStyles:{ fillColor:SOFT },
       margin:{ left:M, right:M },
     };
@@ -4733,32 +4739,34 @@ function exportMonthlyReportPDF(){
 
     /* ---- PORTADA ---- */
     doc.setFillColor(...BLACK);
-    doc.rect(0, 0, pageW, 250, 'F');
+    const BAND = 158; // franja negra compacta (antes 250 pt)
+    doc.rect(0, 0, pageW, BAND, 'F');
     doc.setFillColor(...YELLOW);
-    doc.rect(0, 250, pageW, 6, 'F');
+    doc.rect(0, BAND, pageW, 5, 'F');
 
     const logo = getBrandLogoPNG();
     if (logo){
-      const lw = 96;
+      const lw = 84;
       const lh = lw * (logo.height / logo.width);
-      try{ doc.addImage(logo.dataUrl, 'PNG', M, 42, lw, lh); }catch(e){}
+      // Logo al lado derecho del encabezado, centrado en la banda negra.
+      try{ doc.addImage(logo.dataUrl, 'PNG', pageW - M - lw, (BAND - lh) / 2, lw, lh); }catch(e){}
     }
 
     doc.setTextColor(...YELLOW);
     doc.setFont('helvetica','bold');
     doc.setFontSize(26);
-    doc.text('Reporte ejecutivo', M, 160);
+    doc.text('Reporte ejecutivo', M, 66);
     doc.setTextColor(255,255,255);
     doc.setFont('helvetica','normal');
     doc.setFontSize(12);
-    doc.text('Syntesys Tecnológica S.A.S — Estado General de Proyectos DC', M, 182);
+    doc.text('Syntesys Tecnológica S.A.S — Estado General de Proyectos DC', M, 88);
     doc.setFontSize(10);
     doc.setTextColor(200,200,195);
-    doc.text(`Periodo: ${data.monthLabel}`, M, 208);
-    doc.text(`Generado: ${data.generatedAt}   ·   Preparado por: ${data.preparedBy}`, M, 224);
+    doc.text(`Periodo: ${data.monthLabel}`, M, 114);
+    doc.text(`Generado: ${data.generatedAt}   ·   Preparado por: ${data.preparedBy}`, M, 130);
 
     /* ---- INDICADORES CLAVE (tarjetas) ---- */
-    y = 292;
+    y = BAND + 46;
     doc.setTextColor(...INK);
     doc.setFont('helvetica','bold');
     doc.setFontSize(13);
@@ -4784,11 +4792,11 @@ function exportMonthlyReportPDF(){
       doc.setTextColor(...MUTED);
       doc.setFont('helvetica','normal');
       doc.setFontSize(8.5);
-      doc.text(doc.splitTextToSize(k.label.toUpperCase(), cardW - 18), x + 12, y + 20);
+      doc.text(doc.splitTextToSize(k.label.toUpperCase(), cardW - 18), x + cardW/2, y + 20, { align:'center' });
       doc.setTextColor(...INK);
       doc.setFont('helvetica','bold');
       doc.setFontSize(24);
-      doc.text(String(k.value), x + 12, y + 54);
+      doc.text(String(k.value), x + cardW/2, y + 54, { align:'center' });
     });
     y += cardH + 26;
 
@@ -4819,7 +4827,12 @@ function exportMonthlyReportPDF(){
     const notaTxt = data.bottleneck
       ? `Punto de atención: el mayor cuello de botella del proceso es "${data.bottleneck.label}", con un promedio real de ${data.bottleneck.avg} días. Nota de lectura: la semana en curso aún no termina, por lo que sus totales pueden verse más bajos solo porque faltan días por contar.`
       : 'Nota de lectura: la semana en curso aún no termina, por lo que sus totales pueden verse más bajos solo porque faltan días por contar.';
-    const notaLines = doc.splitTextToSize(pdfSafe(notaTxt), CW - 24);
+    // La fuente debe ser la MISMA con la que se dibuja el texto (normal 9.5)
+    // antes de medir y cortar las líneas; si no, se cortan de más y al
+    // justificar quedan huecos enormes entre palabras.
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(9.5);
+    const notaLines = doc.splitTextToSize(pdfSafe(notaTxt), CW - 28);
     const notaH = notaLines.length * 12 + 20;
     doc.setFillColor(253, 246, 201);
     doc.setDrawColor(...LINE);
@@ -4829,7 +4842,20 @@ function exportMonthlyReportPDF(){
     doc.setTextColor(...INK);
     doc.setFont('helvetica','normal');
     doc.setFontSize(9.5);
-    doc.text(notaLines, M + 14, y + 16);
+    // Texto justificado: cada línea se reparte a todo el ancho de la caja,
+    // salvo la última del párrafo, que queda alineada a la izquierda.
+    const notaW = CW - 28;
+    notaLines.forEach((ln, i) => {
+      const ly = y + 16 + i * 12;
+      const words = ln.split(' ').filter(Boolean);
+      if (i === notaLines.length - 1 || words.length < 2){
+        doc.text(ln, M + 14, ly);
+        return;
+      }
+      const gapW = (notaW - words.reduce((sum, w) => sum + doc.getTextWidth(w), 0)) / (words.length - 1);
+      let wx = M + 14;
+      words.forEach(w => { doc.text(w, wx, ly); wx += doc.getTextWidth(w) + gapW; });
+    });
 
     /* ---- Secciones con gráfico + tabla ---- */
     const ensureSpace = (needed) => {
@@ -4891,7 +4917,7 @@ function exportMonthlyReportPDF(){
         data.facturadas.reduce((s,x)=>s+x,0),
         data.ocRecibida.reduce((s,x)=>s+x,0),
         data.recaudadas.reduce((s,x)=>s+x,0)]],
-      footStyles:{ fillColor:[235,232,223], textColor:INK, fontStyle:'bold' },
+      footStyles:{ fillColor:[235,232,223], textColor:INK, fontStyle:'bold', halign:'center' },
       columnStyles:{ 1:{ halign:'center' }, 2:{ halign:'center' }, 3:{ halign:'center' } },
     });
     y = doc.lastAutoTable.finalY + 26;
@@ -4907,7 +4933,7 @@ function exportMonthlyReportPDF(){
       head:[['Estado','Proyectos','Participación']],
       body: data.estados.map(e => [e.label, e.n, data.total ? `${Math.round(e.n / data.total * 100)}%` : '0%']),
       foot:[['TOTAL', data.total, '100%']],
-      footStyles:{ fillColor:[235,232,223], textColor:INK, fontStyle:'bold' },
+      footStyles:{ fillColor:[235,232,223], textColor:INK, fontStyle:'bold', halign:'center' },
       columnStyles:{ 1:{ halign:'center' }, 2:{ halign:'center' } },
     });
     y = doc.lastAutoTable.finalY + 26;
@@ -4950,7 +4976,7 @@ function exportMonthlyReportPDF(){
       head:[['Ciudad','Proyectos','Participación']],
       body: data.ciudades.map(c => [c.label, c.n, data.total ? `${Math.round(c.n / data.total * 100)}%` : '0%']),
       foot:[['TOTAL', data.total, '100%']],
-      footStyles:{ fillColor:[235,232,223], textColor:INK, fontStyle:'bold' },
+      footStyles:{ fillColor:[235,232,223], textColor:INK, fontStyle:'bold', halign:'center' },
       columnStyles:{ 1:{ halign:'center' }, 2:{ halign:'center' } },
     });
     y = doc.lastAutoTable.finalY + 26;
@@ -4966,7 +4992,7 @@ function exportMonthlyReportPDF(){
       head:[['Contratista','Proyectos','Participación']],
       body: data.contratistas.map(c => [c.label, c.n, data.total ? `${Math.round(c.n / data.total * 100)}%` : '0%']),
       foot:[['TOTAL', data.contratistas.reduce((s,c)=>s+c.n,0), '100%']],
-      footStyles:{ fillColor:[235,232,223], textColor:INK, fontStyle:'bold' },
+      footStyles:{ fillColor:[235,232,223], textColor:INK, fontStyle:'bold', halign:'center' },
       columnStyles:{ 1:{ halign:'center' }, 2:{ halign:'center' } },
     });
 
@@ -5396,7 +5422,7 @@ function exportCustomReportPDF(){
       theme:'grid',
       styles:{ font:'helvetica', fontSize: cols.length > 8 ? 7.5 : 8.6, cellPadding:4.5,
                textColor:INK, lineColor:LINE, lineWidth:0.5, overflow:'linebreak', valign:'middle' },
-      headStyles:{ fillColor:BLACK, textColor:YELLOW, fontStyle:'bold', fontSize: cols.length > 8 ? 7.8 : 8.8 },
+      headStyles:{ fillColor:BLACK, textColor:YELLOW, fontStyle:'bold', halign:'center', fontSize: cols.length > 8 ? 7.8 : 8.8 },
       alternateRowStyles:{ fillColor:SOFT },
       margin:{ left:M, right:M },
     };
@@ -5434,15 +5460,19 @@ function exportCustomReportPDF(){
     doc.setFillColor(...YELLOW);
     doc.rect(0, bandH, pageW, 6, 'F');
 
+    // Logo al lado DERECHO del encabezado, centrado verticalmente en la banda
+    // negra, para que no quede encima del título. El texto reserva ese ancho.
     const logo = getBrandLogoPNG();
+    let textMaxW = CW;
     if (logo){
-      const lw = 92;
-      try{ doc.addImage(logo.dataUrl, 'PNG', M, 36, lw, lw * (logo.height / logo.width)); }catch(e){}
+      const lw = 92, lh = lw * (logo.height / logo.width);
+      try{ doc.addImage(logo.dataUrl, 'PNG', pageW - M - lw, (bandH - lh) / 2, lw, lh); }catch(e){}
+      textMaxW = CW - lw - 24;
     }
     doc.setTextColor(...YELLOW);
     doc.setFont('helvetica','bold');
     doc.setFontSize(landscape ? 22 : 25);
-    doc.text(crPdfSafe(cfg.titulo), M, bandH - 92, { maxWidth: CW });
+    doc.text(crPdfSafe(cfg.titulo), M, bandH - 92, { maxWidth: textMaxW });
     doc.setTextColor(255,255,255);
     doc.setFont('helvetica','normal');
     doc.setFontSize(11.5);
@@ -5487,11 +5517,11 @@ function exportCustomReportPDF(){
       doc.setTextColor(...MUTED);
       doc.setFont('helvetica','normal');
       doc.setFontSize(8.5);
-      doc.text(doc.splitTextToSize(k.label.toUpperCase(), cardW - 18), x + 12, y + 20);
+      doc.text(doc.splitTextToSize(k.label.toUpperCase(), cardW - 18), x + cardW/2, y + 20, { align:'center' });
       doc.setTextColor(...INK);
       doc.setFont('helvetica','bold');
       doc.setFontSize(22);
-      doc.text(k.value, x + 12, y + 52);
+      doc.text(k.value, x + cardW/2, y + 52, { align:'center' });
     });
     y += cardH + 28;
 
@@ -5583,7 +5613,7 @@ function exportCustomReportPDF(){
         head:[['Estado','Proyectos','Participación']],
         body: estadosPresentes.map(e => [e.label, e.n, `${Math.round(e.n / rows.length * 100)}%`]),
         foot:[['TOTAL', rows.length, '100%']],
-        footStyles:{ fillColor:[235,232,223], textColor:INK, fontStyle:'bold' },
+        footStyles:{ fillColor:[235,232,223], textColor:INK, fontStyle:'bold', halign:'center' },
         columnStyles:{ 1:{ halign:'center' }, 2:{ halign:'center' } },
       });
       y = doc.lastAutoTable.finalY + 24;
@@ -5657,9 +5687,18 @@ function exportCustomReportPDF(){
         doc.setTextColor(255,255,255);
         doc.setFont('helvetica','bold');
         doc.setFontSize(10.5);
-        doc.text(crPdfSafe(crLabelOf(k)), M + 14, y + 13);
+        // Nombre del grupo y total, juntos y centrados en la franja.
+        const gName = crPdfSafe(crLabelOf(k));
+        const gSep  = '   ·   ';
+        const gCnt  = `${items.length} proyecto${items.length===1?'':'s'}`;
+        const gW    = doc.getTextWidth(gName) + doc.getTextWidth(gSep) + doc.getTextWidth(gCnt);
+        let gx = M + CW/2 - gW/2;
+        doc.text(gName, gx, y + 13);
+        gx += doc.getTextWidth(gName);
         doc.setTextColor(...YELLOW);
-        doc.text(`${items.length} proyecto${items.length===1?'':'s'}`, pageW - M - 8, y + 13, { align:'right' });
+        doc.text(gSep, gx, y + 13);
+        gx += doc.getTextWidth(gSep);
+        doc.text(gCnt, gx, y + 13);
         y += 28;
         doc.autoTable({ ...commonTable, startY: y, body: bodyOf(items) });
         y = doc.lastAutoTable.finalY + 22;

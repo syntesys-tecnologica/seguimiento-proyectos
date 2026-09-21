@@ -725,8 +725,8 @@ function toggleTheme(){
 // supervisor con permisos reducidos dentro de cada una — ver canSeeAdminTabs).
 const ADMIN_ONLY_TABS = ['analisis','auditoria','usuarios'];
 // Administrador y supervisor comparten acceso de VISUALIZACIÓN a Análisis,
-// Auditoría y Usuarios. Las acciones que modifican datos (editar/eliminar
-// proyectos, archivar auditoría, gestionar usuarios) siguen exclusivas de
+// Control de cambios (antes «Auditoría») y Usuarios. Las acciones que modifican datos (editar/eliminar
+// proyectos, archivar el control de cambios, gestionar usuarios) siguen exclusivas de
 // 'admin' y se validan aparte en cada pantalla/acción.
 function canSeeAdminTabs(role){ return role === 'admin' || role === 'supervisor'; }
 
@@ -741,7 +741,7 @@ const ALL_TAB_DEFS = [
   ['mapa','Mapa'],
   ['proyeccion','Proyección'],
   ['analisis','Análisis'],
-  ['auditoria','Auditoría'],
+  ['auditoria','Control de cambios'],
   ['usuarios','Usuarios'],
 ];
 // Acceso por defecto según el rol, para cuando una persona todavía no tiene
@@ -1492,7 +1492,7 @@ function logChange(entry){
   // a un tope muy alto (20.000 registros) como salvaguarda técnica del
   // almacenamiento, que en uso normal jamás debería alcanzarse. Si en algún
   // momento se quiere "cerrar" un periodo, un administrador puede exportarlo
-  // y luego archivarlo manualmente desde la pestaña Auditoría.
+  // y luego archivarlo manualmente desde la pestaña Control de cambios.
   if (changelog.length > 20000) changelog = changelog.slice(0,20000);
   persistChangelog();
 }
@@ -2195,7 +2195,7 @@ function renderAnalisis(){
   `;
 }
 
-/* ----- AUDITORÍA ----- */
+/* ----- CONTROL DE CAMBIOS (antes «Auditoría»; la clave interna sigue siendo 'auditoria') ----- */
 function renderAuditoria(){
   return `
     <section class="panel">
@@ -2205,7 +2205,7 @@ function renderAuditoria(){
           <p class="auth-note">Cada edición guardada en la aplicación queda registrada aquí con el usuario responsable y permanece disponible para consulta — no se borra sola.</p>
         </div>
         <div class="toolbar-right">
-          <button class="btn btn-outline" data-action="export-audit">Exportar auditoría a Excel</button>
+          <button class="btn btn-outline" data-action="export-audit">Exportar control de cambios a Excel</button>
           ${currentUser.role === 'admin' ? '<button class="btn btn-outline" data-action="confirm-archive-audit">Archivar y reiniciar…</button>' : ''}
         </div>
       </div>
@@ -2696,7 +2696,7 @@ function renderConfirmArchiveAudit(){
   return `
   <div class="modal-overlay" data-action="cancel-archive-audit">
     <div class="modal-card modal-card-sm" data-stop-close>
-      <div class="modal-header"><h2>Archivar y reiniciar auditoría</h2></div>
+      <div class="modal-header"><h2>Archivar y reiniciar control de cambios</h2></div>
       <div class="modal-form">
         <p>Esto va a <strong>descargar primero un Excel</strong> con los ${changelog.length} registro(s) actuales del historial, y luego vaciará el historial en la aplicación para empezar de nuevo (por ejemplo, al cerrar el mes).</p>
         <p class="auth-note">Guarda ese Excel en un lugar seguro: una vez reiniciado, el historial dentro de la aplicación no se puede recuperar.</p>
@@ -2968,10 +2968,46 @@ function buildCharts(){
 }
 
 /* ---------- Ciclo tras render ---------- */
+// Respaldo del Reporte personalizado: cada cambio en el formulario se guarda
+// en customReportState.saved y, si por cualquier motivo la pantalla se vuelve
+// a dibujar con el modal abierto (por ejemplo al pulsar «Actualizar»), las
+// casillas, fechas y demás opciones se restauran tal como estaban.
+function crSaveSelections(){
+  const form = document.getElementById('customReportForm');
+  if (!form || !customReportState) return;
+  const saved = { checks:{}, fields:{} };
+  form.querySelectorAll('input, select, textarea').forEach(el => {
+    if (!el.name) return;
+    if (el.type === 'checkbox'){
+      if (!saved.checks[el.name]) saved.checks[el.name] = [];
+      if (el.checked) saved.checks[el.name].push(el.value);
+    } else if (el.type === 'radio'){
+      if (el.checked) saved.fields[el.name] = el.value;
+    } else {
+      saved.fields[el.name] = el.value;
+    }
+  });
+  customReportState.saved = saved;
+}
+function crRestoreSelections(){
+  const form = document.getElementById('customReportForm');
+  const saved = customReportState && customReportState.saved;
+  if (!form || !saved) return;
+  form.querySelectorAll('input, select, textarea').forEach(el => {
+    if (!el.name) return;
+    if (el.type === 'checkbox'){
+      if (el.name in saved.checks) el.checked = saved.checks[el.name].includes(el.value);
+    } else if (el.type === 'radio'){
+      if (el.name in saved.fields) el.checked = (el.value === saved.fields[el.name]);
+    } else if (el.name in saved.fields){
+      el.value = saved.fields[el.name];
+    }
+  });
+}
 function afterAppRender(){
   // Los conteos y el cruce de filtros del reporte personalizado se calculan
   // apenas se abre el modal, sin esperar a que la persona toque una casilla.
-  if (customReportState) crUpdateCascade();
+  if (customReportState){ crRestoreSelections(); crUpdateCascade(); }
   if (activeTab === 'resumen' || activeTab === 'analisis'){
     requestAnimationFrame(buildCharts);
   }
@@ -3167,6 +3203,7 @@ function onRootClick(e){
 function onRootChange(e){
   if (e.target.closest('#customReportForm')){
     crUpdateCascade();
+    crSaveSelections();
     return;
   }
   if (e.target.matches('[data-mapa-horizonte]')){
@@ -3184,6 +3221,7 @@ function onRootChange(e){
 function onRootInput(e){
   if (e.target.closest('#customReportForm')){
     crUpdateCascade();
+    crSaveSelections();
     return;
   }
   if (e.target.matches('[name="fInicioObra"], [name="fEntrega"]') && e.target.closest('#projectForm')){
@@ -3745,6 +3783,7 @@ function ganttColor(estado){ return hexToRgb(STATUS_COLORS[estado] || '#8c8c86')
 // Qué fecha(s) / dato(s) se muestran en la tabla de detalle de cada estado
 // del informe de estado (Proyección), tanto en PDF como en Word:
 //    - POR INICIAR      → fecha de inicio de obra
+//    - EN DISEÑO        → fecha de inicio de obra (programada)
 //    - EN PROCESO        → fecha inicio real de obra + fecha entrega al cliente (inicio garantía)
 //    - FINALIZADA        → fecha entrega al cliente (inicio garantía)
 //    - LIQUIDADA         → fecha de liquidación al cliente
@@ -3753,6 +3792,8 @@ function ganttColor(estado){ return hexToRgb(STATUS_COLORS[estado] || '#8c8c86')
 //    - RECAUDADO         → fecha de facturación de recaudo
 const ESTADO_REPORT_FIELDS = {
   'POR INICIAR':    [{ key:'fInicioObra',        label:'Fecha de inicio de obra' }],
+  'EN DISEÑO':      [{ key:'fInicioObra',        label:'Fecha de inicio de obra' },
+                      { key:'fEntrega',           label:'Fecha entrega al cliente (inicio garantía)' }],
   'EN PROCESO':     [{ key:'fInicioObra',        label:'Fecha inicio real de obra' },
                       { key:'fEntrega',           label:'Fecha entrega al cliente (inicio garantía)' }],
   'FINALIZADA':     [{ key:'fEntrega',           label:'Fecha entrega al cliente (inicio garantía)' }],
@@ -3762,6 +3803,10 @@ const ESTADO_REPORT_FIELDS = {
                       { key:'fEmisionFactura',    label:'Fecha emisión factura' }],
   'RECAUDADO':      [{ key:'fFacturacionRecaudo',label:'Fecha de facturación de recaudo' }],
 };
+// Red de seguridad: si algún día se agrega un estado nuevo a STATUSES y se
+// olvida definirlo arriba, igual sale en el informe (con la fecha de inicio de
+// obra) en vez de desaparecer en silencio.
+const ESTADO_REPORT_FALLBACK = [{ key:'fInicioObra', label:'Fecha de inicio de obra' }];
 // Calcula los tramos que se dibujan para un proyecto:
 //  - una barra por cada fase (ver GANTT_PHASES) cuyas dos fechas estén
 //    registradas y en orden, con el color del estado de esa fase;
@@ -3810,7 +3855,9 @@ function buildGanttData(projectList){
     const items = projectList
       .filter(p => p.estado === st)
       .map(p => ({ p, segs: ganttSegments(p, today) }))
-      .filter(it => it.segs.length || parseDateSafe(it.p.fInicioObra))
+      // Todos los proyectos del estado salen en el diagrama; los que aún no
+      // tienen ninguna fecha se listan al final, con la nota "Sin fechas
+      // registradas" en vez de barra.
       .sort((a,b) => (parseDateSafe(a.p.fInicioObra) || far) - (parseDateSafe(b.p.fInicioObra) || far));
     if (!items.length) return;
     ganttRows.push({ type:'group', estado:st, count:items.length });
@@ -3995,6 +4042,11 @@ function drawGanttPDF(doc, projectList){
       if (inicio){
         doc.setFillColor(...ganttColor(p.estado));
         doc.circle(xOf(inicio), rowTop+rowH/2, 3, 'F');
+      } else {
+        doc.setFont('helvetica','italic');
+        doc.setFontSize(7.5);
+        doc.setTextColor(150,150,142);
+        doc.text('Sin fechas registradas', timelineLeft + 6, rowTop+rowH-5);
       }
     }
     y += rowH;
@@ -4135,6 +4187,10 @@ function renderGanttImage(projectList){
       if (inicio){
         ctx.fillStyle = rgbStr(ganttColor(p.estado));
         ctx.beginPath(); ctx.arc(xOf(inicio), y+rowH/2-2, 3, 0, Math.PI*2); ctx.fill();
+      } else {
+        ctx.fillStyle = '#96968e';
+        ctx.font = 'italic 10px Helvetica, Arial, sans-serif';
+        ctx.fillText('Sin fechas registradas', timelineLeft + 6, y+rowH-7);
       }
     }
     y += rowH;
@@ -4202,8 +4258,8 @@ function exportMapaPDF(){
   //    dato(s) que corresponden a esa etapa del proceso (ver
   //    ESTADO_REPORT_FIELDS, definido junto a GANTT_PHASES para que también
   //    lo use exportMapaDOCX).
-  STATUSES.filter(st => ESTADO_REPORT_FIELDS[st]).forEach(st => {
-    const campos = ESTADO_REPORT_FIELDS[st];
+  STATUSES.forEach(st => {
+    const campos = ESTADO_REPORT_FIELDS[st] || ESTADO_REPORT_FALLBACK;
     const items = projects.filter(p => p.estado === st);
     if (!items.length) return; // Sin proyectos en este estado: no se exporta su tabla.
     if (y > 680){ doc.addPage(); y = 48; }
@@ -4293,8 +4349,8 @@ async function exportMapaDOCX(){
   }));
   children.push(new Paragraph({ text:'', spacing:{ after:200 } }));
 
-  STATUSES.filter(st => ESTADO_REPORT_FIELDS[st]).forEach(st => {
-    const campos = ESTADO_REPORT_FIELDS[st];
+  STATUSES.forEach(st => {
+    const campos = ESTADO_REPORT_FIELDS[st] || ESTADO_REPORT_FALLBACK;
     const items = projects.filter(p => p.estado === st);
     if (!items.length) return; // Sin proyectos en este estado: no se exporta su tabla.
     children.push(new Paragraph({ heading:HeadingLevel.HEADING_2, children:[ new TextRun(`${st} — ${items.length}`) ] }));
@@ -6035,7 +6091,7 @@ function exportExcel(){
   logChange({ project:'—', text:'Exportó el estado general a Excel.' });
 }
 
-/* ---------- Auditoría: exportar y archivar ---------- */
+/* ---------- Control de cambios: exportar y archivar ---------- */
 function buildAuditWorkbook(){
   const rows = changelog.map(c => ({
     'FECHA': fmtDateTime(c.ts),
@@ -6046,24 +6102,24 @@ function buildAuditWorkbook(){
   const ws = XLSX.utils.json_to_sheet(rows);
   ws['!cols'] = [{ wch:20 },{ wch:26 },{ wch:32 },{ wch:70 }];
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'AUDITORIA');
+  XLSX.utils.book_append_sheet(wb, ws, 'CONTROL DE CAMBIOS');
   return wb;
 }
 
 function exportAuditLog(){
   if (!changelog.length){
-    alert('Todavía no hay registros de auditoría para exportar.');
+    alert('Todavía no hay registros del control de cambios para exportar.');
     return;
   }
   const wb = buildAuditWorkbook();
   const stamp = new Date().toISOString().slice(0,10);
-  XLSX.writeFile(wb, `Auditoria_Proyectos_DC_${stamp}.xlsx`);
+  XLSX.writeFile(wb, `Control_de_cambios_Proyectos_DC_${stamp}.xlsx`);
 }
 
 async function doArchiveAudit(){
   const wb = buildAuditWorkbook();
   const stamp = new Date().toISOString().slice(0,10);
-  XLSX.writeFile(wb, `Auditoria_Proyectos_DC_${stamp}.xlsx`);
+  XLSX.writeFile(wb, `Control_de_cambios_Proyectos_DC_${stamp}.xlsx`);
 
   const archivedCount = changelog.length;
   const archivedByLabel = currentUser.name;
@@ -6084,12 +6140,15 @@ async function doArchiveAudit(){
 // Para que NO afecte a la persona mientras trabaja, se salta por completo si:
 //   - hay un modal abierto (editando un proyecto, un usuario, o confirmando
 //     una eliminación) — no queremos pisarle lo que está a mitad de llenar.
+//   - tiene abierto el modal del Reporte personalizado (Proyección): armar
+//     el reporte puede tomar varios minutos y un re-dibujado le borraría las
+//     casillas marcadas.
 //   - tiene el foco puesto en un campo de texto, select o buscador — para no
 //     interrumpirle mientras escribe o filtra.
 // Además conserva la posición del scroll para que la pantalla no salte.
 let autoRefreshTimer = null;
 function isUserCurrentlyEditing(){
-  if (modalState || userModalState || pendingDeleteId || pendingDeleteUserEmail || trashPanelOpen || pendingPurgeId || pendingEmptyTrash) return true;
+  if (modalState || customReportState || userModalState || pendingDeleteId || pendingDeleteUserEmail || trashPanelOpen || pendingPurgeId || pendingEmptyTrash) return true;
   const el = document.activeElement;
   if (!el) return false;
   return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT';

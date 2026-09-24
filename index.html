@@ -4251,7 +4251,8 @@ function exportMapaPDF(){
   y += 8;
   const estadosBody = STATUSES.map(st => [st, String(projects.filter(p=>p.estado===st).length)]);
   estadosBody.push(['Total', String(projects.length)]);
-  doc.autoTable({ ...tableStyle, startY:y+8, head:[['Estado','Cantidad de proyectos']], body:estadosBody });
+  doc.autoTable({ ...tableStyle, startY:y+8, head:[['Estado','Cantidad de proyectos']], body:estadosBody,
+    columnStyles:{ 1:{ halign:'center' } } });
   y = doc.lastAutoTable.finalY + 24;
 
   // 2) Un detalle por cada estado, mostrando únicamente la(s) fecha(s) /
@@ -4267,6 +4268,11 @@ function exportMapaPDF(){
     doc.setFontSize(12);
     doc.text(`${st} — ${items.length}`, marginX, y);
     y += 8;
+    // Cliente, Sede y Ciudad quedan a la izquierda; las columnas de la
+    // etapa (cantidad de proyectos ya centrada arriba, fechas, N° factura…)
+    // van centradas.
+    const campoColumnStyles = {};
+    campos.forEach((c, i) => { campoColumnStyles[3 + i] = { halign:'center' }; });
     doc.autoTable({
       ...tableStyle,
       startY: y+8,
@@ -4275,6 +4281,7 @@ function exportMapaPDF(){
         p.cliente||'—', p.sede||'—', p.ciudad||'—',
         ...campos.map(c => c.text ? (p[c.key] || '—') : fmtDate(p[c.key])),
       ]),
+      columnStyles: campoColumnStyles,
     });
     y = doc.lastAutoTable.finalY + 24;
   });
@@ -4303,6 +4310,7 @@ async function exportMapaDOCX(){
   const darkShading = { fill:'141414', type:ShadingType.CLEAR, color:'auto' };
   const headCell = (text) => new TableCell({ shading:darkShading, children:[ new Paragraph({ alignment:AlignmentType.CENTER, children:[ new TextRun({ text, bold:true, color:'F6D500', size:19 }) ] }) ] });
   const bodyCell = (text) => new TableCell({ children:[ new Paragraph({ children:[ new TextRun({ text:String(text ?? '—'), size:18 }) ] }) ] });
+  const bodyCellCenter = (text) => new TableCell({ children:[ new Paragraph({ alignment:AlignmentType.CENTER, children:[ new TextRun({ text:String(text ?? '—'), size:18 }) ] }) ] });
 
   // Encabezado: banda negra con el título a la izquierda y el logo de
   // Syntesys a la derecha (mismo estilo que el PDF y el Reporte ejecutivo).
@@ -4344,7 +4352,7 @@ async function exportMapaDOCX(){
     width:{ size:100, type:WidthType.PERCENTAGE },
     rows:[
       new TableRow({ children:[ headCell('Estado'), headCell('Cantidad de proyectos') ] }),
-      ...estadosRows.map(([a,b]) => new TableRow({ children:[ bodyCell(a), bodyCell(b) ] })),
+      ...estadosRows.map(([a,b]) => new TableRow({ children:[ bodyCell(a), bodyCellCenter(b) ] })),
     ],
   }));
   children.push(new Paragraph({ text:'', spacing:{ after:200 } }));
@@ -4358,9 +4366,11 @@ async function exportMapaDOCX(){
       width:{ size:100, type:WidthType.PERCENTAGE },
       rows:[
         new TableRow({ children:[ headCell('Cliente'), headCell('Sede'), headCell('Ciudad'), ...campos.map(c => headCell(c.label)) ] }),
+        // Cliente, Sede y Ciudad a la izquierda; las columnas de la etapa
+        // (fechas, N° factura…) centradas.
         ...items.map(p => new TableRow({ children:[
           bodyCell(p.cliente), bodyCell(p.sede), bodyCell(p.ciudad),
-          ...campos.map(c => bodyCell(c.text ? (p[c.key] || '—') : fmtDate(p[c.key]))),
+          ...campos.map(c => bodyCellCenter(c.text ? (p[c.key] || '—') : fmtDate(p[c.key]))),
         ] })),
       ],
     }));

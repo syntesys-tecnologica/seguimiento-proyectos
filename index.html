@@ -3795,7 +3795,8 @@ const ESTADO_REPORT_FIELDS = {
   'EN DISEÑO':      [{ key:'fInicioObra',        label:'Fecha de inicio de obra' },
                       { key:'fEntrega',           label:'Fecha entrega al cliente (inicio garantía)' }],
   'EN PROCESO':     [{ key:'fInicioObra',        label:'Fecha inicio real de obra' },
-                      { key:'fEntrega',           label:'Fecha entrega al cliente (inicio garantía)' }],
+                      { key:'fEntrega',           label:'Fecha entrega al cliente (inicio garantía)' },
+                      { key:'avance',             label:'% Avance', avance:true }],
   'FINALIZADA':     [{ key:'fEntrega',           label:'Fecha entrega al cliente (inicio garantía)' }],
   'LIQUIDADA':      [{ key:'fLiquidacion',       label:'Fecha de liquidación al cliente' }],
   'OC SOLICITADA':  [{ key:'fLiquidacion',       label:'Fecha de liquidación al cliente' }],
@@ -4279,7 +4280,7 @@ function exportMapaPDF(){
       head:[['Cliente','Sede','Ciudad', ...campos.map(c => c.label)]],
       body: items.map(p => [
         p.cliente||'—', p.sede||'—', p.ciudad||'—',
-        ...campos.map(c => c.text ? (p[c.key] || '—') : fmtDate(p[c.key])),
+        ...campos.map(c => c.avance ? `${computeAvance(p)}%` : c.text ? (p[c.key] || '—') : fmtDate(p[c.key])),
       ]),
       columnStyles: campoColumnStyles,
     });
@@ -4370,7 +4371,7 @@ async function exportMapaDOCX(){
         // (fechas, N° factura…) centradas.
         ...items.map(p => new TableRow({ children:[
           bodyCell(p.cliente), bodyCell(p.sede), bodyCell(p.ciudad),
-          ...campos.map(c => bodyCellCenter(c.text ? (p[c.key] || '—') : fmtDate(p[c.key]))),
+          ...campos.map(c => bodyCellCenter(c.avance ? `${computeAvance(p)}%` : c.text ? (p[c.key] || '—') : fmtDate(p[c.key]))),
         ] })),
       ],
     }));

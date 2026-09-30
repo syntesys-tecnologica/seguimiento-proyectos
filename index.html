@@ -3892,7 +3892,8 @@ function buildGanttData(projectList){
 // ganttSegments). Si un proyecto solo tiene la fecha de inicio de obra (aún
 // no hay tramo real, por ejemplo un "POR INICIAR" recién programado), se
 // marca con un punto del color de su estado en vez de una barra.
-function drawGanttPDF(doc, projectList){
+function drawGanttPDF(doc, projectList, opts){
+  opts = opts || {};
   const gdata = buildGanttData(projectList);
   if (!gdata) return;
   const { ganttRows, minDate, maxDate, today } = gdata;
@@ -3921,10 +3922,10 @@ function drawGanttPDF(doc, projectList){
     doc.setTextColor(255,255,255);
     doc.setFont('helvetica','bold');
     doc.setFontSize(16);
-    doc.text('Diagrama de Gantt — proyección por fechas de estado', gMarginX, 30);
+    doc.text(opts.title || 'Diagrama de Gantt — proyección por fechas de estado', gMarginX, 30);
     doc.setFont('helvetica','normal');
     doc.setFontSize(10);
-    doc.text('Syntesys Tecnológica S.A.S — Estado General de Proyectos DC', gMarginX, 48);
+    doc.text(opts.subtitle || 'Syntesys Tecnológica S.A.S — Estado General de Proyectos DC', gMarginX, 48);
     doc.setFontSize(9);
     doc.text(`Generado el ${fmtDateTime(new Date().toISOString())}${pageNum>1 ? ` · continuación (página ${pageNum} del diagrama)` : ''}`, gMarginX, 62);
     addLogoToBand(doc, brandLogo, pw, gMarginX, 70, 54);
@@ -5541,8 +5542,13 @@ function renderCustomReportModal(){
             <label class="rep-check"><input type="checkbox" name="incGrafico" checked /><span>Gráficos de distribución</span></label>
             <label class="rep-check"><input type="checkbox" name="incObs" /><span>Observaciones de cada proyecto</span></label>
             <label class="rep-check"><input type="checkbox" name="incFiltros" checked /><span>Hoja de criterios aplicados</span></label>
+            <label class="rep-check"><input type="checkbox" name="incGantt" /><span>Diagrama de Gantt por estado</span></label>
+            <label class="rep-check"><input type="checkbox" name="ganttSolo" /><span>Descargar solo el Gantt (sin tablas ni gráficos)</span></label>
           </div>
         </div>
+
+        ${grupo('Estados del diagrama de Gantt', 'Aplica cuando activas «Diagrama de Gantt por estado». Marca, por ejemplo, solo «POR INICIAR» o solo «EN PROCESO». Sin ninguno marcado se incluyen todos los estados.', 'gest',
+          STATUSES.map(s => ({ value:s, label:s })))}
 
         <p class="rep-count" id="customReportCount"></p>
 
@@ -5580,6 +5586,9 @@ function readCustomReportConfig(){
     incGrafico: !!fd.get('incGrafico'),
     incObs: !!fd.get('incObs'),
     incFiltros: !!fd.get('incFiltros'),
+    incGantt: !!fd.get('incGantt'),
+    ganttSolo: !!fd.get('ganttSolo'),
+    ganttEstados: all('gest'),
   };
 }
 
@@ -5704,7 +5713,8 @@ function crCellValue(p, col){
 function exportCustomReportPDF(){
   const cfg = readCustomReportConfig();
   if (!cfg) return;
-  if (!cfg.columnas.length){
+  const soloGantt = cfg.incGantt && cfg.ganttSolo;
+  if (!soloGantt && !cfg.columnas.length){
     alert('Selecciona al menos una columna para el detalle del reporte.');
     return;
   }
@@ -5713,6 +5723,18 @@ function exportCustomReportPDF(){
     alert('Ningún proyecto coincide con los criterios seleccionados. Ajusta los filtros e inténtalo de nuevo.');
     return;
   }
+  // Proyectos que entran al Gantt: los del reporte que además estén en alguno
+  // de los estados marcados en «Estados del diagrama de Gantt».
+  const ganttRows = cfg.incGantt ? rows.filter(p => crMatches(cfg.ganttEstados, String(p.estado || ''))) : [];
+  if (cfg.incGantt && !ganttRows.length){
+    alert('Ningún proyecto de los estados marcados para el Gantt coincide con los filtros del reporte. Ajusta los estados del diagrama o los filtros.');
+    return;
+  }
+  if (cfg.ganttSolo && !cfg.incGantt){
+    alert('Marca «Diagrama de Gantt por estado» para descargar solo el Gantt.');
+    return;
+  }
+  if (soloGantt) return exportCustomGanttPDF(cfg, ganttRows);
 
   return withReportBusy('do-custom-report', 'Generando PDF…', async () => {
     if (typeof window.jspdf === 'undefined'){
@@ -6069,10 +6091,55 @@ function exportCustomReportPDF(){
       doc.text(`Página ${i} de ${totalPages}`, pageW - M, pageH - 28, { align:'right' });
     }
 
+    /* ---- Diagrama de Gantt por estado (páginas horizontales al final; llevan su propio encabezado) ---- */
+    if (cfg.incGantt && ganttRows.length){
+      if (buildGanttData(ganttRows)) drawGanttPDF(doc, ganttRows, crGanttOpts(cfg));
+      else alert('Los proyectos seleccionados no tienen fechas registradas para graficar el diagrama de Gantt; el reporte se genera sin él.');
+    }
+
     const slug = cfg.titulo.normalize('NFD').replace(/[\u0300-\u036f]/g,'')
       .replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,40) || 'Reporte_personalizado';
     doc.save(`${slug}_${stamp}.pdf`);
     logChange({ project:'—', text:`Generó el reporte personalizado "${cfg.titulo}" en PDF (${rows.length} proyecto(s)).` });
+    customReportState = null;
+    render();
+  });
+}
+
+// Encabezado del Gantt según el título elegido para el reporte y los estados marcados.
+function crGanttOpts(cfg){
+  const custom = cfg.titulo && cfg.titulo !== 'Reporte personalizado';
+  const sel = cfg.ganttEstados || [];
+  const estados = (sel.length && sel.length < STATUSES.length) ? ` · ${sel.join(', ')}` : '';
+  return {
+    title: 'Diagrama de Gantt por estado',
+    subtitle: crPdfSafe('Syntesys Tecnológica S.A.S' + (custom ? ' — ' + cfg.titulo : ' — Estado General de Proyectos DC') + estados),
+  };
+}
+// Descarga solo el diagrama de Gantt (opción «Descargar solo el Gantt» del
+// formulario), con los estados y filtros marcados. Reutiliza drawGanttPDF, el
+// mismo dibujo que lleva el informe de estado.
+function exportCustomGanttPDF(cfg, ganttRows){
+  return withReportBusy('do-custom-report', 'Generando Gantt…', async () => {
+    if (typeof window.jspdf === 'undefined'){
+      alert('No se pudo cargar la librería de PDF. Revisa tu conexión a internet y actualiza la página.');
+      return;
+    }
+    if (!buildGanttData(ganttRows)){
+      alert('Los proyectos seleccionados no tienen fechas registradas para graficar el diagrama de Gantt.');
+      return;
+    }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit:'pt', format:'a4', orientation:'landscape' });
+    drawGanttPDF(doc, ganttRows, crGanttOpts(cfg));
+    // drawGanttPDF siempre abre páginas nuevas; aquí la primera (vacía) sobra.
+    if (doc.internal.getNumberOfPages() > 1) doc.deletePage(1);
+    const sel = cfg.ganttEstados || [];
+    const sufijo = (sel.length && sel.length < STATUSES.length)
+      ? '_' + sel.join('_').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,40)
+      : '';
+    doc.save(`Gantt_por_estado${sufijo}_${new Date().toISOString().slice(0,10)}.pdf`);
+    logChange({ project:'—', text:`Descargó el diagrama de Gantt por estado en PDF (${ganttRows.length} proyecto(s)).` });
     customReportState = null;
     render();
   });

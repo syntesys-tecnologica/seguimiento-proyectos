@@ -3082,6 +3082,7 @@ function onRootClick(e){
     case 'export-monthly-report-pdf': exportMonthlyReportPDF(); break;
     case 'open-custom-report': customReportState = {}; render(); break;
     case 'close-custom-report': customReportState = null; render(); break;
+    case 'do-custom-report-docx': exportCustomReportDOCX(); break;
     case 'cr-toggle-all': {
       // "Todos" / "Ninguno" de cada bloque de casillas del reporte personalizado.
       const form = document.getElementById('customReportForm');
@@ -5554,6 +5555,7 @@ function renderCustomReportModal(){
 
         <div class="modal-footer">
           <button type="button" class="btn btn-text" data-action="close-custom-report">Cancelar</button>
+          <button type="button" class="btn btn-outline" data-action="do-custom-report-docx">Generar Word</button>
           <button type="submit" class="btn btn-primary" data-action="do-custom-report">Generar PDF</button>
         </div>
       </form>
@@ -5710,30 +5712,93 @@ function crCellValue(p, col){
   return crPdfSafe(v);
 }
 
-function exportCustomReportPDF(){
+// Lee el formulario y valida las opciones; lo comparten el PDF y el Word.
+// Gráficos del reporte personalizado como imágenes PNG (distribución por estado
+// y, si hay agrupación distinta de estado, por ese criterio). Los usan el PDF y el Word.
+async function crBuildChartImages(cfg, rows){
+  const charts = [];
+  const estadosPresentes = STATUSES.map(st => ({ label:st, n: rows.filter(p=>p.estado===st).length })).filter(e=>e.n>0);
+    if (cfg.incGrafico && estadosPresentes.length){
+      charts.push({
+        key:'estado',
+        title:'Distribución por estado',
+        width:1080, height:Math.max(320, estadosPresentes.length * 46 + 80),
+        config:{
+          type:'bar',
+          data:{
+            labels: estadosPresentes.map(e=>e.label),
+            datasets:[{
+              label:'Proyectos',
+              data: estadosPresentes.map(e=>e.n),
+              backgroundColor: estadosPresentes.map(e => STATUS_COLORS[e.label] || REPORT_BRAND.black),
+              borderRadius:5, borderSkipped:false, maxBarThickness:26,
+            }],
+          },
+          options:{ indexAxis:'y', plugins:{ legend:reportLegend(false), tooltip:{ enabled:false } },
+                    scales:reportScales({ horizontal:true, padRight:14 }) },
+        },
+      });
+    }
+    if (cfg.incGrafico){
+      if (cfg.groupBy && cfg.groupBy !== 'estado'){
+        const counts = {};
+        rows.forEach(p => { const k = crValueOf(p, cfg.groupBy); counts[k] = (counts[k]||0) + 1; });
+        const pairs = Object.entries(counts).sort((a,b) => b[1]-a[1]);
+        const gLabel = (CR_GROUPS.find(g=>g.key===cfg.groupBy)||{}).label || cfg.groupBy;
+        charts.push({
+          key:'grupo',
+          title:`Distribución por ${gLabel.toLowerCase()}`,
+          width:1080, height:Math.max(320, pairs.length * 32 + 80),
+          config:{
+            type:'bar',
+            data:{
+              labels: pairs.map(([k]) => crLabelOf(k)),
+              datasets:[{ label:'Proyectos', data: pairs.map(([,n]) => n),
+                          backgroundColor:'#3B7DD8', borderRadius:5, borderSkipped:false, maxBarThickness:22 }],
+            },
+            options:{ indexAxis:'y', plugins:{ legend:reportLegend(false), tooltip:{ enabled:false } },
+                      scales:reportScales({ horizontal:true, padRight:14 }) },
+          },
+        });
+      }
+      for (const spec of charts){
+        spec.dataUrl = await renderReportChartImage(spec);
+      }
+    }
+  return charts;
+}
+
+function crPrepare(){
   const cfg = readCustomReportConfig();
-  if (!cfg) return;
+  if (!cfg) return null;
   const soloGantt = cfg.incGantt && cfg.ganttSolo;
   if (!soloGantt && !cfg.columnas.length){
     alert('Selecciona al menos una columna para el detalle del reporte.');
-    return;
+    return null;
   }
   const rows = filterProjectsForCustomReport(cfg);
   if (!rows.length){
     alert('Ningún proyecto coincide con los criterios seleccionados. Ajusta los filtros e inténtalo de nuevo.');
-    return;
+    return null;
   }
   // Proyectos que entran al Gantt: los del reporte que además estén en alguno
   // de los estados marcados en «Estados del diagrama de Gantt».
   const ganttRows = cfg.incGantt ? rows.filter(p => crMatches(cfg.ganttEstados, String(p.estado || ''))) : [];
   if (cfg.incGantt && !ganttRows.length){
     alert('Ningún proyecto de los estados marcados para el Gantt coincide con los filtros del reporte. Ajusta los estados del diagrama o los filtros.');
-    return;
+    return null;
   }
   if (cfg.ganttSolo && !cfg.incGantt){
     alert('Marca «Diagrama de Gantt por estado» para descargar solo el Gantt.');
-    return;
+    return null;
   }
+  return { cfg, rows, ganttRows, soloGantt };
+}
+
+function exportCustomReportPDF(){
+  const prep = crPrepare();
+  if (!prep) return;
+  const { cfg, rows, ganttRows, soloGantt } = prep;
   if (soloGantt) return exportCustomGanttPDF(cfg, ganttRows);
 
   return withReportBusy('do-custom-report', 'Generando PDF…', async () => {
@@ -5896,54 +5961,7 @@ function exportCustomReportPDF(){
     }
 
     /* ---- Resumen por estado + gráficos ---- */
-    const charts = [];
-    if (cfg.incGrafico && estadosPresentes.length){
-      charts.push({
-        key:'estado',
-        title:'Distribución por estado',
-        width:1080, height:Math.max(320, estadosPresentes.length * 46 + 80),
-        config:{
-          type:'bar',
-          data:{
-            labels: estadosPresentes.map(e=>e.label),
-            datasets:[{
-              label:'Proyectos',
-              data: estadosPresentes.map(e=>e.n),
-              backgroundColor: estadosPresentes.map(e => STATUS_COLORS[e.label] || REPORT_BRAND.black),
-              borderRadius:5, borderSkipped:false, maxBarThickness:26,
-            }],
-          },
-          options:{ indexAxis:'y', plugins:{ legend:reportLegend(false), tooltip:{ enabled:false } },
-                    scales:reportScales({ horizontal:true, padRight:14 }) },
-        },
-      });
-    }
-    if (cfg.incGrafico){
-      if (cfg.groupBy && cfg.groupBy !== 'estado'){
-        const counts = {};
-        rows.forEach(p => { const k = crValueOf(p, cfg.groupBy); counts[k] = (counts[k]||0) + 1; });
-        const pairs = Object.entries(counts).sort((a,b) => b[1]-a[1]);
-        const gLabel = (CR_GROUPS.find(g=>g.key===cfg.groupBy)||{}).label || cfg.groupBy;
-        charts.push({
-          key:'grupo',
-          title:`Distribución por ${gLabel.toLowerCase()}`,
-          width:1080, height:Math.max(320, pairs.length * 32 + 80),
-          config:{
-            type:'bar',
-            data:{
-              labels: pairs.map(([k]) => crLabelOf(k)),
-              datasets:[{ label:'Proyectos', data: pairs.map(([,n]) => n),
-                          backgroundColor:'#3B7DD8', borderRadius:5, borderSkipped:false, maxBarThickness:22 }],
-            },
-            options:{ indexAxis:'y', plugins:{ legend:reportLegend(false), tooltip:{ enabled:false } },
-                      scales:reportScales({ horizontal:true, padRight:14 }) },
-          },
-        });
-      }
-      for (const spec of charts){
-        spec.dataUrl = await renderReportChartImage(spec);
-      }
-    }
+    const charts = await crBuildChartImages(cfg, rows);
 
     if (cfg.incResumen){
       doc.addPage(); y = 52;
@@ -6101,6 +6119,269 @@ function exportCustomReportPDF(){
       .replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,40) || 'Reporte_personalizado';
     doc.save(`${slug}_${stamp}.pdf`);
     logChange({ project:'—', text:`Generó el reporte personalizado "${cfg.titulo}" en PDF (${rows.length} proyecto(s)).` });
+    customReportState = null;
+    render();
+  });
+}
+
+/* ---------- Reporte personalizado en Word (.docx) ---------- */
+// Mismo contenido que el PDF: portada, indicadores, criterios, resumen por estado,
+// gráficos, detalle (agrupado o no), observaciones y, si se pidió, el Gantt por
+// estado como imagen en páginas horizontales.
+function exportCustomReportDOCX(){
+  const prep = crPrepare();
+  if (!prep) return;
+  const { cfg, rows, ganttRows, soloGantt } = prep;
+
+  return withReportBusy('do-custom-report-docx', 'Generando Word…', async () => {
+    if (typeof window.docx === 'undefined'){
+      alert('No se pudo cargar la librería de Word. Revisa tu conexión a internet y actualiza la página.');
+      return;
+    }
+    const { Document, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, ShadingType, HeadingLevel, ImageRun,
+            Packer, AlignmentType, BorderStyle, VerticalAlign, Footer, PageNumber } = window.docx;
+
+    const cols = CR_COLUMNS.filter(c => cfg.columnas.includes(c.key));
+    const landscape = soloGantt || cfg.orient === 'landscape' || (cfg.orient === 'auto' && cols.length > 6);
+    const imgW = landscape ? 860 : 600;
+    const small = cols.length > 8;
+    const sz = small ? 15 : 18;
+
+    const generatedAt = fmtDateTime(new Date().toISOString());
+    const preparedBy = (currentUser && currentUser.name) ? currentUser.name : '—';
+    const stamp = new Date().toISOString().slice(0,10);
+    const hex = (c) => String(c || '').replace('#','');
+
+    const darkShading = { fill: hex(REPORT_BRAND.black), type:ShadingType.CLEAR, color:'auto' };
+    const softShading = { fill: hex(REPORT_BRAND.soft),  type:ShadingType.CLEAR, color:'auto' };
+    const headCell = (text) => new TableCell({ shading:darkShading, verticalAlign:VerticalAlign.CENTER, children:[
+      new Paragraph({ alignment:AlignmentType.CENTER, children:[ new TextRun({ text:String(text), bold:true, color: hex(REPORT_BRAND.yellow), size: small ? 16 : 19 }) ] }) ] });
+    const cell = (text, o = {}) => new TableCell({ shading:o.shade, verticalAlign:VerticalAlign.CENTER, children:[
+      new Paragraph({ alignment:o.center ? AlignmentType.CENTER : AlignmentType.LEFT, children:[
+        new TextRun({ text:String(text ?? '—'), size:o.size || sz, bold:!!o.bold, color:o.color }) ] }) ] });
+    const spacer = () => new Paragraph({ text:'', spacing:{ after:160 } });
+    const h1 = (t) => new Paragraph({ heading:HeadingLevel.HEADING_1, children:[ new TextRun(crPdfSafe(t)) ] });
+    const h2 = (t) => new Paragraph({ heading:HeadingLevel.HEADING_2, children:[ new TextRun(crPdfSafe(t)) ] });
+    const note = (t) => new Paragraph({ spacing:{ after:120 }, children:[ new TextRun({ text:crPdfSafe(t), size:17, color: hex(REPORT_BRAND.muted) }) ] });
+    const dataUrlToBuf = async (u) => (await fetch(u)).arrayBuffer();
+
+    const footer = new Footer({ children:[ new Paragraph({ alignment:AlignmentType.CENTER, children:[
+      new TextRun({ text: crPdfSafe(`Syntesys Tecnológica S.A.S — ${cfg.titulo} · Documento interno · Página `), size:16, color: hex(REPORT_BRAND.muted) }),
+      new TextRun({ children:[ PageNumber.CURRENT ], size:16, color: hex(REPORT_BRAND.muted) }),
+    ] }) ] });
+
+    /* ---- Portada: banda negra con el título y el logo a la derecha ---- */
+    const logo = getBrandLogoPNG();
+    const logoBuf = logo ? await dataUrlToBuf(logo.dataUrl) : null;
+    const noBorder = { style:BorderStyle.NONE, size:0, color: hex(REPORT_BRAND.black) };
+    const noBorders = { top:noBorder, bottom:noBorder, left:noBorder, right:noBorder };
+    const titleLines = [
+      new Paragraph({ children:[ new TextRun({ text:crPdfSafe(cfg.titulo), bold:true, size:36, color: hex(REPORT_BRAND.yellow) }) ] }),
+      new Paragraph({ children:[ new TextRun({ text:'Syntesys Tecnológica S.A.S — Estado General de Proyectos DC', size:20, color:'FFFFFF' }) ] }),
+    ];
+    if (cfg.subtitulo) titleLines.push(new Paragraph({ children:[ new TextRun({ text:crPdfSafe(cfg.subtitulo), size:19, color: hex(REPORT_BRAND.yellow) }) ] }));
+    titleLines.push(new Paragraph({ children:[ new TextRun({ text:`Generado: ${generatedAt}   ·   Preparado por: ${preparedBy}`, size:17, color:'C8C8C3' }) ] }));
+    const headerTable = new Table({
+      width:{ size:100, type:WidthType.PERCENTAGE },
+      rows:[ new TableRow({ children:[
+        new TableCell({ width:{ size:80, type:WidthType.PERCENTAGE }, shading:darkShading, borders:noBorders,
+          verticalAlign:VerticalAlign.CENTER, margins:{ top:220, bottom:220, left:240, right:120 }, children:titleLines }),
+        new TableCell({ width:{ size:20, type:WidthType.PERCENTAGE }, shading:darkShading, borders:noBorders,
+          verticalAlign:VerticalAlign.CENTER, margins:{ top:120, bottom:120, left:120, right:240 },
+          children:[ new Paragraph({ alignment:AlignmentType.RIGHT,
+            children: logoBuf ? [ new ImageRun({ data:logoBuf, transformation:{ width:Math.round(64 * (logo.width/logo.height)), height:64 } }) ] : [] }) ] }),
+      ] }) ],
+    });
+
+    const sections = [];
+    const mainChildren = [ headerTable, spacer() ];
+
+    if (!soloGantt){
+      /* ---- Indicadores ---- */
+      const avgAvance = Math.round(rows.reduce((t,p)=>t+(Number(p.avance)||0),0) / rows.length);
+      const estadosPresentes = STATUSES.map(st => ({ label:st, n: rows.filter(p=>p.estado===st).length })).filter(e=>e.n>0);
+      const ciudadesPresentes = new Set(rows.map(p => crValueOf(p,'ciudad'))).size;
+      const kpis = [
+        ['Proyectos incluidos', String(rows.length)],
+        ['Del total registrado', `${Math.round(rows.length / (projects.length||1) * 100)}%`],
+        ['Avance promedio', `${avgAvance}%`],
+        ['Ciudades', String(ciudadesPresentes)],
+      ];
+      mainChildren.push(h1('Resultado de la selección'));
+      mainChildren.push(new Table({
+        width:{ size:100, type:WidthType.PERCENTAGE },
+        rows:[ new TableRow({ children: kpis.map(([label, value]) => new TableCell({
+          shading:softShading, margins:{ top:100, bottom:100, left:80, right:80 },
+          children:[
+            new Paragraph({ alignment:AlignmentType.CENTER, children:[ new TextRun({ text:label.toUpperCase(), size:15, color: hex(REPORT_BRAND.muted) }) ] }),
+            new Paragraph({ alignment:AlignmentType.CENTER, children:[ new TextRun({ text:value, bold:true, size:44 }) ] }),
+          ] })) }) ],
+      }));
+      mainChildren.push(spacer());
+
+      /* ---- Criterios aplicados ---- */
+      if (cfg.incFiltros){
+        const listOrAll = (sel, total) => !sel.length || sel.length === total ? 'Todos' : sel.map(crLabelOf).join(', ');
+        const dateLabel = cfg.dateField
+          ? `${(CR_DATE_FIELDS.find(f=>f.key===cfg.dateField)||{}).label || cfg.dateField}: ${cfg.desde ? fmtDate(cfg.desde) : 'inicio'} a ${cfg.hasta ? fmtDate(cfg.hasta) : 'hoy'}`
+          : 'Sin filtro de fechas';
+        const criterios = [
+          ['Estados', listOrAll(cfg.estados, STATUSES.length)],
+          ['Ciudades', listOrAll(cfg.ciudades, crOptions('ciudad').length)],
+          ['Departamentos', listOrAll(cfg.departamentos, crOptions('departamento').length)],
+          ['Coordinadores', listOrAll(cfg.coordinadores, crOptions('coordinador').length)],
+          ['Contratistas', listOrAll(cfg.contratistas, crOptions('contratista').length)],
+          ['Rango de fechas', dateLabel],
+          ['Agrupado por', (CR_GROUPS.find(g=>g.key===cfg.groupBy)||{}).label || 'Sin agrupar'],
+        ];
+        if (cfg.incGantt){
+          const sel = cfg.ganttEstados;
+          criterios.push(['Estados del Gantt', !sel.length || sel.length === STATUSES.length ? 'Todos' : sel.join(', ')]);
+        }
+        mainChildren.push(h1('Criterios aplicados'));
+        mainChildren.push(note('Deja constancia del alcance exacto de este informe, para que cualquiera pueda reproducirlo después.'));
+        mainChildren.push(new Table({
+          width:{ size:100, type:WidthType.PERCENTAGE },
+          rows:[
+            new TableRow({ children:[ headCell('Criterio'), headCell('Selección') ] }),
+            ...criterios.map(([a,b]) => new TableRow({ children:[ cell(a, { bold:true, shade:softShading }), cell(crPdfSafe(b)) ] })),
+          ],
+        }));
+        mainChildren.push(spacer());
+      }
+
+      /* ---- Resumen por estado ---- */
+      if (cfg.incResumen){
+        mainChildren.push(h1('Resumen por estado'));
+        mainChildren.push(note('Cantidad de proyectos incluidos en el reporte, por etapa del proceso.'));
+        mainChildren.push(new Table({
+          width:{ size:100, type:WidthType.PERCENTAGE },
+          rows:[
+            new TableRow({ children:[ headCell('Estado'), headCell('Proyectos'), headCell('Participación') ] }),
+            ...estadosPresentes.map(e => new TableRow({ children:[
+              cell(e.label), cell(e.n, { center:true }), cell(`${Math.round(e.n / rows.length * 100)}%`, { center:true }) ] })),
+            new TableRow({ children:[
+              cell('TOTAL', { bold:true, shade:softShading }), cell(rows.length, { center:true, bold:true, shade:softShading }),
+              cell('100%', { center:true, bold:true, shade:softShading }) ] }),
+          ],
+        }));
+        mainChildren.push(spacer());
+      }
+
+      /* ---- Gráficos ---- */
+      if (cfg.incGrafico){
+        const charts = await crBuildChartImages(cfg, rows);
+        for (const spec of charts){
+          if (!spec.dataUrl) continue;
+          mainChildren.push(h1(spec.title));
+          mainChildren.push(new Paragraph({ children:[ new ImageRun({
+            data: await dataUrlToBuf(spec.dataUrl),
+            transformation:{ width:imgW, height:Math.round(spec.height * (imgW / spec.width)) },
+          }) ] }));
+        }
+      }
+
+      /* ---- Detalle de proyectos ---- */
+      const estadoColIndex = cols.findIndex(c => c.key === 'estado');
+      const detailTable = (list) => new Table({
+        width:{ size:100, type:WidthType.PERCENTAGE },
+        rows:[
+          new TableRow({ tableHeader:true, children: cols.map(c => headCell(c.label)) }),
+          ...list.map(p => new TableRow({ children: cols.map((c, i) => {
+            const v = crCellValue(p, c);
+            if (i === estadoColIndex && STATUS_COLORS[String(p.estado)]) return cell(v, { bold:true, color: hex(STATUS_COLORS[String(p.estado)]) });
+            return cell(v);
+          }) })),
+        ],
+      });
+      const sortByName = (a,b) => String(a.cliente||'').localeCompare(String(b.cliente||'')) ||
+                                  String(a.sede||'').localeCompare(String(b.sede||''));
+
+      mainChildren.push(h1('Detalle de proyectos'));
+      mainChildren.push(note(`${rows.length} proyecto${rows.length===1?'':'s'} que cumplen los criterios seleccionados.`));
+      if (cfg.groupBy){
+        const groups = {};
+        rows.forEach(p => { const k = crValueOf(p, cfg.groupBy); (groups[k] = groups[k] || []).push(p); });
+        let keys = Object.keys(groups);
+        keys = cfg.groupBy === 'estado'
+          ? STATUSES.filter(s => keys.includes(s)).concat(keys.filter(k => !STATUSES.includes(k)))
+          : keys.sort((a,b) => groups[b].length - groups[a].length || String(a).localeCompare(String(b)));
+        keys.forEach(k => {
+          const items = groups[k].slice().sort(sortByName);
+          mainChildren.push(h2(`${crLabelOf(k)} — ${items.length} proyecto${items.length===1?'':'s'}`));
+          mainChildren.push(detailTable(items));
+          mainChildren.push(spacer());
+        });
+      } else {
+        mainChildren.push(detailTable(rows.slice().sort(sortByName)));
+        mainChildren.push(spacer());
+      }
+
+      /* ---- Observaciones ---- */
+      if (cfg.incObs){
+        const conObs = rows.filter(p => String(p.observaciones || '').trim()).sort(sortByName);
+        if (conObs.length){
+          mainChildren.push(h1('Observaciones registradas'));
+          mainChildren.push(note('Notas de seguimiento escritas por el equipo en cada proyecto.'));
+          conObs.forEach(p => {
+            mainChildren.push(new Paragraph({
+              spacing:{ before:160, after:40 },
+              border:{ bottom:{ style:BorderStyle.SINGLE, size:4, color: hex(REPORT_BRAND.line), space:2 } },
+              children:[ new TextRun({ text: crPdfSafe(`${p.cliente || 'Proyecto'} — ${p.sede || ''} (${p.ciudad || '—'})`), bold:true, size:20 }) ],
+            }));
+            String(p.observaciones).split(/\r?\n/).forEach(line => {
+              mainChildren.push(new Paragraph({ children:[ new TextRun({ text:crPdfSafe(line), size:18, color: hex(REPORT_BRAND.muted) }) ] }));
+            });
+          });
+        }
+      }
+    }
+
+    /* ---- Diagrama de Gantt por estado (imagen, en páginas horizontales) ---- */
+    let ganttChildren = null;
+    if (cfg.incGantt){
+      const gantt = await renderGanttImage(ganttRows);
+      if (gantt){
+        const w = 860;
+        const gImg = new Paragraph({ children:[ new ImageRun({
+          data: await gantt.blob.arrayBuffer(),
+          transformation:{ width:w, height:Math.round(gantt.height * (w / gantt.width)) },
+        }) ] });
+        if (soloGantt){
+          const opts = crGanttOpts(cfg);
+          mainChildren.push(h1(opts.title));
+          mainChildren.push(note(opts.subtitle));
+          mainChildren.push(gImg);
+        } else {
+          ganttChildren = [ h1('Diagrama de Gantt por estado'), note(crGanttOpts(cfg).subtitle), gImg ];
+        }
+      } else if (soloGantt){
+        alert('Los proyectos seleccionados no tienen fechas registradas para graficar el diagrama de Gantt.');
+        return;
+      } else {
+        alert('Los proyectos seleccionados no tienen fechas registradas para graficar el diagrama de Gantt; el reporte se genera sin él.');
+      }
+    }
+
+    sections.push({
+      properties:{ page:{ size:{ orientation: landscape ? 'landscape' : 'portrait' } } },
+      footers:{ default: footer },
+      children: mainChildren,
+    });
+    if (ganttChildren){
+      sections.push({
+        properties:{ page:{ size:{ orientation:'landscape' } } },
+        footers:{ default: footer },
+        children: ganttChildren,
+      });
+    }
+
+    const doc = new Document({ sections });
+    const blob = await Packer.toBlob(doc);
+    const slug = cfg.titulo.normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+      .replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,40) || 'Reporte_personalizado';
+    downloadBlob(blob, `${soloGantt ? 'Gantt_por_estado' : slug}_${stamp}.docx`);
+    logChange({ project:'—', text:`Generó el reporte personalizado "${cfg.titulo}" en Word (${rows.length} proyecto(s)).` });
     customReportState = null;
     render();
   });

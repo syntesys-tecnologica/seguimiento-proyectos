@@ -3850,6 +3850,12 @@ function ganttSegments(p, today){
 // de la lista de proyectos. La comparten drawGanttPDF (dibuja con jsPDF) y
 // renderGanttImage (dibuja en un <canvas> para incrustar como imagen en el
 // Word), así ambos formatos muestran exactamente la misma información.
+// Etiqueta de cada fila del Gantt: Cliente — Código tienda (si tiene) — Sede.
+function ganttLabel(p){
+  return p.codigoTienda
+    ? `${p.cliente||'—'} — ${p.codigoTienda} — ${p.sede||'—'}`
+    : `${p.cliente||'—'} — ${p.sede||'—'}`;
+}
 function buildGanttData(projectList){
   const today = new Date(); today.setHours(0,0,0,0);
   const far = new Date(8640000000000000);
@@ -3902,7 +3908,7 @@ function drawGanttPDF(doc, projectList, opts){
   const spanMs = Math.max(1, maxDate - minDate);
   const monthNames = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
 
-  const gMarginX = 40, labelColW = 190, rowH = 16, topOffset = 142, bottomMargin = 36;
+  const gMarginX = 40, labelColW = 230, rowH = 16, topOffset = 142, bottomMargin = 36;
   const brandLogo = getBrandLogoPNG();
   let pw, ph, timelineLeft, timelineRight;
   const xOf = (d) => timelineLeft + ((d - minDate) / spanMs) * (timelineRight - timelineLeft);
@@ -4025,7 +4031,7 @@ function drawGanttPDF(doc, projectList, opts){
     doc.setFont('helvetica','normal');
     doc.setFontSize(8);
     doc.setTextColor(40,40,40);
-    const label = `${p.cliente||'—'} — ${p.sede||'—'}`;
+    const label = ganttLabel(p);
     doc.text(doc.splitTextToSize(label, labelColW-8)[0], gMarginX+4, rowTop+rowH-5);
 
     let drewAny = false;
@@ -4068,7 +4074,7 @@ function renderGanttImage(projectList){
   const monthNames = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
 
   const scale = 2; // más resolución para que el PNG se vea nítido en el Word.
-  const gMarginX = 20, labelColW = 190, rowH = 20, topOffset = 128, bottomPad = 14;
+  const gMarginX = 20, labelColW = 230, rowH = 20, topOffset = 128, bottomPad = 14;
   const cw = 1180, ch = topOffset + ganttRows.length*rowH + bottomPad;
   const timelineLeft = gMarginX + labelColW, timelineRight = cw - gMarginX;
   const xOf = (d) => timelineLeft + ((d - minDate) / spanMs) * (timelineRight - timelineLeft);
@@ -4166,9 +4172,10 @@ function renderGanttImage(projectList){
     const p = row.p;
     ctx.font = '8.5px Helvetica, Arial, sans-serif';
     ctx.fillStyle = '#282828';
-    let label = `${p.cliente||'—'} — ${p.sede||'—'}`;
+    const fullLabel = ganttLabel(p);
+    let label = fullLabel;
     while (ctx.measureText(label).width > labelColW-8 && label.length > 3) label = label.slice(0,-2);
-    if (label !== `${p.cliente||'—'} — ${p.sede||'—'}`) label = label.slice(0,-1)+'…';
+    if (label !== fullLabel) label = label.slice(0,-1)+'…';
     ctx.fillText(label, gMarginX+4, y+rowH-7);
 
     let drewAny = false;
@@ -4276,13 +4283,13 @@ function exportMapaPDF(){
     // etapa (cantidad de proyectos ya centrada arriba, fechas, N° factura…)
     // van centradas.
     const campoColumnStyles = {};
-    campos.forEach((c, i) => { campoColumnStyles[3 + i] = { halign:'center' }; });
+    campos.forEach((c, i) => { campoColumnStyles[4 + i] = { halign:'center' }; });
     doc.autoTable({
       ...tableStyle,
       startY: y+8,
-      head:[['Cliente','Sede','Ciudad', ...campos.map(c => c.label)]],
+      head:[['Cliente','Código tienda','Sede','Ciudad', ...campos.map(c => c.label)]],
       body: items.map(p => [
-        p.cliente||'—', p.sede||'—', p.ciudad||'—',
+        p.cliente||'—', p.codigoTienda||'—', p.sede||'—', p.ciudad||'—',
         ...campos.map(c => c.avance ? `${computeAvance(p)}%` : c.text ? (p[c.key] || '—') : fmtDate(p[c.key])),
       ]),
       columnStyles: campoColumnStyles,
@@ -4369,11 +4376,11 @@ async function exportMapaDOCX(){
     children.push(new Table({
       width:{ size:100, type:WidthType.PERCENTAGE },
       rows:[
-        new TableRow({ children:[ headCell('Cliente'), headCell('Sede'), headCell('Ciudad'), ...campos.map(c => headCell(c.label)) ] }),
+        new TableRow({ children:[ headCell('Cliente'), headCell('Código tienda'), headCell('Sede'), headCell('Ciudad'), ...campos.map(c => headCell(c.label)) ] }),
         // Cliente, Sede y Ciudad a la izquierda; las columnas de la etapa
         // (fechas, N° factura…) centradas.
         ...items.map(p => new TableRow({ children:[
-          bodyCell(p.cliente), bodyCell(p.sede), bodyCell(p.ciudad),
+          bodyCell(p.cliente), bodyCell(p.codigoTienda || '—'), bodyCell(p.sede), bodyCell(p.ciudad),
           ...campos.map(c => bodyCellCenter(c.avance ? `${computeAvance(p)}%` : c.text ? (p[c.key] || '—') : fmtDate(p[c.key]))),
         ] })),
       ],
@@ -5370,8 +5377,8 @@ const CR_DATE_FIELDS = [
 // Columnas disponibles para la tabla de detalle del PDF.
 const CR_COLUMNS = [
   { key:'cliente',             label:'Cliente',            def:true },
+  { key:'codigoTienda',        label:'Código tienda',      def:true },
   { key:'sede',                label:'Sede',               def:true },
-  { key:'codigoTienda',        label:'Código tienda' },
   { key:'ciudad',              label:'Ciudad',             def:true },
   { key:'departamento',        label:'Departamento' },
   { key:'tipoProyecto',        label:'Tipo de proyecto' },

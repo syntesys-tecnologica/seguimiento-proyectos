@@ -609,6 +609,7 @@ const FIELD_GROUPS = [
   { key:'general', title:'Información general', fields:[
     {key:'cliente', label:'Cliente', type:'text'},
     {key:'sede', label:'Sede', type:'text'},
+    {key:'codigoTienda', label:'Código Tienda', type:'text'},
     {key:'tipoProyecto', label:'Tipo de proyecto', type:'text'},
     {key:'departamento', label:'Departamento', type:'text'},
     {key:'ciudad', label:'Ciudad', type:'text'},
@@ -646,7 +647,7 @@ const FIELD_GROUPS = [
 
 const EXPORT_HEADERS = [
   ['departamento','DEPARTAMENTO'],['ciudad','CIUDAD'],['tipoProyecto','TIPO PROYECTO'],
-  ['cliente','CLIENTE'],['sede','SEDE'],['coordinador','COORDINADOR DEL PROYECTO'],
+  ['cliente','CLIENTE'],['sede','SEDE'],['codigoTienda','CÓDIGO TIENDA'],['coordinador','COORDINADOR DEL PROYECTO'],
   ['estado','ESTADO'],['contratista','CONTRATISTA'],['nCotizacion','N° DE COTIZACIÓN'],
   ['fEnvioCot','FECHA ENVÍO COTIZACIÓN CLIENTE'],['fAprobCot','FECHA APROBACIÓN COTIZACIÓN CLIENTE'],
   ['fInicioObra','FECHA INICIO REAL DE OBRA'],['fCompraEquipos','FECHA COMPRA EQUIPOS'],['fPruebas','FECHA DE PRUEBAS FUNCIONAMIENTO EQUIPOS'],
@@ -1578,7 +1579,7 @@ function filteredProjects(){
     if (filters.coordinador && p.coordinador !== filters.coordinador) return false;
     if (filters.search){
       const s = filters.search.toLowerCase();
-      const hay = `${p.cliente||''} ${p.sede||''} ${p.ciudad||''} ${p.nCotizacion||''}`.toLowerCase();
+      const hay = `${p.cliente||''} ${p.sede||''} ${p.ciudad||''} ${p.codigoTienda||''} ${p.nCotizacion||''}`.toLowerCase();
       if (!hay.includes(s)) return false;
     }
     return true;
@@ -1779,7 +1780,7 @@ function renderProyectos(){
     <section class="panel">
       <div class="toolbar">
         <div class="toolbar-left">
-          <input class="text-input search-input" type="text" placeholder="Buscar cliente, sede, ciudad o cotización..." value="${esc(filters.search)}" data-filter="search" />
+          <input class="text-input search-input" type="text" placeholder="Buscar cliente, sede, código tienda, ciudad o cotización..." value="${esc(filters.search)}" data-filter="search" />
           <select class="text-input" data-filter="contratista">
             <option value="">Todos los contratistas</option>
             ${contratistas.map(c=>`<option value="${esc(c)}" ${filters.contratista===c?'selected':''}>${esc(c)}</option>`).join('')}
@@ -5370,6 +5371,7 @@ const CR_DATE_FIELDS = [
 const CR_COLUMNS = [
   { key:'cliente',             label:'Cliente',            def:true },
   { key:'sede',                label:'Sede',               def:true },
+  { key:'codigoTienda',        label:'Código tienda' },
   { key:'ciudad',              label:'Ciudad',             def:true },
   { key:'departamento',        label:'Departamento' },
   { key:'tipoProyecto',        label:'Tipo de proyecto' },

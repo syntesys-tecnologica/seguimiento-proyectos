@@ -4282,7 +4282,7 @@ function exportMapaPDF(){
     // Cliente, Sede y Ciudad quedan a la izquierda; las columnas de la
     // etapa (cantidad de proyectos ya centrada arriba, fechas, N° factura…)
     // van centradas.
-    const campoColumnStyles = {};
+    const campoColumnStyles = { 1:{ halign:'center' } };   // Código tienda centrado
     campos.forEach((c, i) => { campoColumnStyles[4 + i] = { halign:'center' }; });
     doc.autoTable({
       ...tableStyle,
@@ -4380,7 +4380,7 @@ async function exportMapaDOCX(){
         // Cliente, Sede y Ciudad a la izquierda; las columnas de la etapa
         // (fechas, N° factura…) centradas.
         ...items.map(p => new TableRow({ children:[
-          bodyCell(p.cliente), bodyCell(p.codigoTienda || '—'), bodyCell(p.sede), bodyCell(p.ciudad),
+          bodyCell(p.cliente), bodyCellCenter(p.codigoTienda || '—'), bodyCell(p.sede), bodyCell(p.ciudad),
           ...campos.map(c => bodyCellCenter(c.avance ? `${computeAvance(p)}%` : c.text ? (p[c.key] || '—') : fmtDate(p[c.key]))),
         ] })),
       ],
@@ -6010,9 +6010,11 @@ function exportCustomReportPDF(){
     const head = [cols.map(c => c.label)];
     const bodyOf = (list) => list.map(p => cols.map(c => crCellValue(p, c)));
     const estadoColIndex = cols.findIndex(c => c.key === 'estado');
+    const codigoColIndex = cols.findIndex(c => c.key === 'codigoTienda');
     const commonTable = {
       ...tableStyle,
       head,
+      columnStyles: codigoColIndex >= 0 ? { [codigoColIndex]:{ halign:'center' } } : {},
       didParseCell: (hook) => {
         if (hook.section === 'body' && estadoColIndex >= 0 && hook.column.index === estadoColIndex){
           const color = STATUS_COLORS[String(hook.cell.raw)];
@@ -6299,7 +6301,7 @@ function exportCustomReportDOCX(){
           ...list.map(p => new TableRow({ children: cols.map((c, i) => {
             const v = crCellValue(p, c);
             if (i === estadoColIndex && STATUS_COLORS[String(p.estado)]) return cell(v, { bold:true, color: hex(STATUS_COLORS[String(p.estado)]) });
-            return cell(v);
+            return cell(v, { center: c.key === 'codigoTienda' });
           }) })),
         ],
       });

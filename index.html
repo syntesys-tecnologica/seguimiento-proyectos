@@ -256,7 +256,7 @@ html[data-theme="dark"] .notif-dropdown{ background:#1c1c1c; }
   .notif-dropdown{ position:fixed; top:auto; bottom:0; left:0; right:0; width:auto; max-width:none; border-radius:16px 16px 0 0; max-height:75vh; }
 }
 
-.app-body{ flex:1; max-width:1240px; margin:0 auto; width:100%; padding:0 28px 60px; }
+.app-body{ flex:1; max-width:1400px; margin:0 auto; width:100%; padding:0 28px 60px; }
 
 .tabs{ display:flex; gap:2px; margin-top:20px; border-bottom:1px solid var(--line); overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
 .tabs::-webkit-scrollbar{ display:none; }
@@ -445,6 +445,12 @@ html[data-theme="dark"] .data-table tbody tr:hover{ background:#242118; }
 .data-table-compact thead th{ white-space:normal; text-align:center; }
 .data-table-compact td, .data-table-compact th{ word-break:break-word; overflow-wrap:break-word; text-align:center; }
 .data-table-compact td:first-child, .data-table-compact th:first-child{ text-align:left; }
+/* Tabla de Proyectos: más compacta */
+.data-table-proyectos{ min-width:0; font-size:12.5px; }
+.data-table-proyectos thead th{ padding:12px 8px; letter-spacing:.03em; }
+.data-table-proyectos tbody td{ padding:12px 8px; }
+.data-table-proyectos .cell-actions{ white-space:normal; }
+.data-table-proyectos .cell-actions .btn-text{ display:block; padding:3px 6px; }
 .cell-strong{ font-weight:700; }
 .cell-sub{ color:var(--muted); font-size:12px; }
 .cell-actions{ white-space:nowrap; text-align:right; }
@@ -1839,7 +1845,7 @@ function renderProyectosResults(list){
   const currentSupervisorView = currentUser && currentUser.role === 'supervisor';
   return `
       <div class="table-wrap">
-        <table class="data-table">
+         <table class="data-table data-table-proyectos">
           <thead>
             <tr>
               <th>Estado</th><th>Cliente / Sede</th><th>Código tienda</th><th>Ciudad</th><th>Coordinador</th>

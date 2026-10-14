@@ -1842,7 +1842,7 @@ function renderProyectosResults(list){
         <table class="data-table">
           <thead>
             <tr>
-              <th>Estado</th><th>Cliente / Sede</th><th>Ciudad</th><th>Coordinador</th>
+              <th>Estado</th><th>Cliente / Sede</th><th>Código tienda</th><th>Ciudad</th><th>Coordinador</th>
               <th>Contratista</th><th>Avance</th><th>Última modificación</th><th></th>
             </tr>
           </thead>
@@ -1855,6 +1855,7 @@ function renderProyectosResults(list){
                   <div class="cell-sub">${esc(p.sede||'—')}</div>
                 </td>
                 <td>${esc(p.ciudad||'—')}</td>
+                <td>${esc(p.codigoTienda||'—')}</td>
                 <td>${esc(p.coordinador||'—')}</td>
                 <td>${esc(p.contratista||'—')}</td>
                 <td>
@@ -1871,7 +1872,7 @@ function renderProyectosResults(list){
                   <button class="btn btn-text btn-text-danger" data-action="confirm-delete" data-id="${p.id}">Eliminar</button>`}
                 </td>
               </tr>
-            `).join('') || `<tr><td colspan="8" class="empty-row">No hay proyectos que coincidan con los filtros seleccionados.</td></tr>`}
+            `).join('') || `<tr><td colspan="9" class="empty-row">No hay proyectos que coincidan con los filtros seleccionados.</td></tr>`}
           </tbody>
         </table>
       </div>

@@ -1687,6 +1687,9 @@ function friendlyAuthError(e){
   const c = (e && e.code) || '';
   if (/invalid-credential|wrong-password|user-not-found|invalid-login/.test(c)) return 'Correo o contraseña incorrectos.';
   if (/too-many-requests/.test(c)) return 'Demasiados intentos fallidos. Espera unos minutos o restablece tu contraseña.';
+  if (/app\/reset-too-soon/.test(c)) return 'Ya se envió un enlace hace instantes. Espera un minuto y usa solo el correo más reciente (cada envío anula los anteriores).';
+  if (/expired-action-code/.test(c)) return 'Este enlace caducó. Solicita uno nuevo.';
+  if (/invalid-action-code/.test(c)) return 'Este enlace ya se usó o no es válido. Solicita uno nuevo.';
   if (/network-request-failed/.test(c)) return 'Sin conexión con el servidor. Revisa tu internet e intenta de nuevo.';
   if (/email-already-in-use/.test(c)) return 'Ya existe una cuenta con ese correo.';
   if (/weak-password/.test(c)) return 'La contraseña es muy débil (mínimo 6 caracteres).';
@@ -1753,10 +1756,115 @@ async function createAuthAccount(email, password){
     throw e;
   }finally{ try{ await au.signOut(secAuth); }catch(e){} }
 }
+// Cada envío invalida los enlaces anteriores de esa persona. Por eso se bloquea el doble
+// clic y se exige una pausa corta entre envíos al mismo correo.
+const _resetLastSent = {};
+const RESET_COOLDOWN_MS = 60000;
 async function sendResetEmail(email){
-  const { auth, au } = await getFirebase();
-  await au.sendPasswordResetEmail(auth, userDocId(email));
+  const id = userDocId(email);
+  const last = _resetLastSent[id] || 0;
+  if (Date.now() - last < RESET_COOLDOWN_MS){
+    const err = new Error('reset too soon'); err.code = 'app/reset-too-soon'; throw err;
+  }
+  _resetLastSent[id] = Date.now(); // se marca antes de enviar para cubrir clics dobles
+  try{
+    const { auth, au } = await getFirebase();
+    await au.sendPasswordResetEmail(auth, id);
+  }catch(e){ delete _resetLastSent[id]; throw e; }
 }
+
+/* ---------- Crear / restablecer contraseña con pantalla propia ----------
+   El enlace del correo apunta a esta página (?mode=resetPassword&oobCode=…).
+   Un escáner de correo que solo abre la URL no pulsa "Continuar", así que no
+   gasta el enlace (que es de un solo uso). */
+let resetFlow = null; // { oobCode, stage:'confirm'|'form'|'done'|'error', email, error, busy, notice }
+(function detectResetLink(){
+  try{
+    const q = new URLSearchParams(location.search);
+    if (q.get('mode') === 'resetPassword' && q.get('oobCode')){
+      resetFlow = { oobCode: q.get('oobCode'), stage:'confirm', email:'', error:'', busy:false, notice:'' };
+      history.replaceState(null, '', location.pathname); // quita el código de la barra de direcciones
+    }
+  }catch(e){}
+})();
+function renderResetFlow(){
+  const f = resetFlow; let body = '';
+  const err = f.error ? `<div class="auth-error">${esc(f.error)}</div>` : '';
+  if (f.stage === 'confirm'){
+    body = `<div class="auth-form">
+      <p>Pulsa el botón para continuar y crear tu nueva contraseña.</p>
+      <button class="btn btn-primary btn-block" type="button" data-action="reset-continue" ${f.busy?'disabled':''}>${f.busy?'Verificando…':'Continuar'}</button>
+    </div>`;
+  } else if (f.stage === 'form'){
+    body = `<form data-action-submit="do-reset-confirm" class="auth-form">
+      ${err}
+      <label class="field-label">Cuenta</label>
+      <input class="text-input" type="email" value="${esc(f.email)}" disabled />
+      <label class="field-label">Nueva contraseña</label>
+      <input class="text-input" type="password" name="password" minlength="6" autocomplete="new-password" placeholder="Mínimo 6 caracteres" required />
+      <label class="field-label">Repite la contraseña</label>
+      <input class="text-input" type="password" name="password2" minlength="6" autocomplete="new-password" required />
+      <button class="btn btn-primary btn-block" type="submit" ${f.busy?'disabled':''}>${f.busy?'Guardando…':'Guardar contraseña'}</button>
+    </form>`;
+  } else if (f.stage === 'done'){
+    body = `<div class="auth-form">
+      <div class="auth-simulated-email"><p>Tu contraseña quedó guardada. Ya puedes iniciar sesión.</p></div>
+      <button class="btn btn-primary btn-block" type="button" data-action="reset-exit">Ir a iniciar sesión</button>
+    </div>`;
+  } else {
+    body = `<form data-action-submit="do-reset-resend" class="auth-form">
+      ${err}
+      ${f.notice ? `<div class="auth-simulated-email"><p>${esc(f.notice)}</p></div>` : ''}
+      <label class="field-label">Correo corporativo</label>
+      <input class="text-input" type="email" name="email" value="${esc(f.email)}" placeholder="nombre@syntesys.co" required />
+      <button class="btn btn-primary btn-block" type="submit" ${f.busy?'disabled':''}>${f.busy?'Enviando…':'Enviar un enlace nuevo'}</button>
+      <div class="auth-links"><button type="button" class="btn btn-text" data-action="reset-exit">Volver al inicio de sesión</button></div>
+    </form>`;
+  }
+  const title = f.stage === 'done' ? 'Contraseña actualizada' : f.stage === 'error' ? 'Solicita un enlace nuevo' : 'Crea tu contraseña';
+  return `<div class="auth-screen"><div class="auth-card">
+    <h1 class="auth-title">${title}</h1>
+    <p class="auth-subtitle">Syntesys Tecnológica S.A.S — Estado General de Proyectos DC</p>
+    ${body}
+  </div></div>`;
+}
+async function resetContinue(){
+  const f = resetFlow; if (!f || f.busy) return;
+  f.busy = true; f.error = ''; render();
+  try{
+    const { auth, au } = await getFirebase();
+    f.email = await au.verifyPasswordResetCode(auth, f.oobCode); // solo verifica; NO consume el enlace
+    f.stage = 'form';
+  }catch(e){ f.stage = 'error'; f.error = friendlyAuthError(e); }
+  f.busy = false; render();
+}
+async function doResetConfirm(fd){
+  const f = resetFlow; if (!f || f.busy) return;
+  const p1 = String(fd.get('password')), p2 = String(fd.get('password2'));
+  if (p1 !== p2){ f.error = 'Las contraseñas no coinciden.'; render(); return; }
+  f.busy = true; f.error = ''; render();
+  try{
+    const { auth, au } = await getFirebase();
+    await au.confirmPasswordReset(auth, f.oobCode, p1);
+    authEmailDraft = f.email; f.stage = 'done';
+  }catch(e){
+    const c = (e && e.code) || '';
+    if (/expired-action-code|invalid-action-code/.test(c)){ f.stage = 'error'; }
+    f.error = friendlyAuthError(e);
+  }
+  f.busy = false; render();
+}
+async function doResetResend(fd){
+  const f = resetFlow; if (!f || f.busy) return;
+  const email = userDocId(fd.get('email')); f.email = email; f.notice = ''; f.error = ''; f.busy = true; render();
+  try{
+    await sendResetEmail(email);
+    f.notice = 'Si el correo está registrado, recibirás un enlace nuevo. Abre solo el correo más reciente.';
+  }catch(e){ f.error = friendlyAuthError(e); }
+  f.busy = false; render();
+}
+function resetExit(){ resetFlow = null; authView = 'login'; authError = ''; authNotice = ''; render(); }
+
 function randomPassword(){
   const c = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
   const a = new Uint32Array(16); crypto.getRandomValues(a);
@@ -1820,7 +1928,13 @@ async function doLogin(fd){
   authBusy = false; render();
   if (currentUser){ ensureDailyBackup(); checkLegacyUsers(); }
 }
+let _forgotBusy = false;
 async function doForgotPassword(){
+  if (_forgotBusy) return;
+  _forgotBusy = true;
+  try{ await _doForgotPassword(); } finally { _forgotBusy = false; }
+}
+async function _doForgotPassword(){
   const input = document.querySelector('.auth-form input[name="email"]');
   const email = input ? userDocId(input.value) : '';
   authNotice = ''; authError = '';
@@ -1876,7 +1990,9 @@ function getUnreadNotifCount(){
 
 /* ---------- Render raíz ---------- */
 function render(){
-  if (!currentUser){
+  if (resetFlow){
+    root.innerHTML = renderResetFlow();
+  } else if (!currentUser){
     root.innerHTML = renderAuth();
   } else {
     root.innerHTML = renderApp();
@@ -3515,6 +3631,8 @@ function onRootClick(e){
       break;
     case 'retry-load': refreshData(); break;
     case 'forgot-password': doForgotPassword(); break;
+    case 'reset-continue': resetContinue(); break;
+    case 'reset-exit': resetExit(); break;
     case 'reactivate-user': doReactivateUser(btn.dataset.email); break;
     case 'migrate-legacy': migrateLegacyUsers(); break;
     case 'retry-save': retrySave(); break;
@@ -3716,6 +3834,8 @@ function onRootSubmit(e){
   const action = form.dataset.actionSubmit;
   const fd = new FormData(form);
   if (action === 'do-login') return doLogin(fd);
+  if (action === 'do-reset-confirm') return doResetConfirm(fd);
+  if (action === 'do-reset-resend') return doResetResend(fd);
   if (action === 'do-create-user') return doCreateUser(fd);
   if (action === 'do-reset-user') return doResetUser(fd);
   if (action === 'do-edit-user') return doEditUser(fd);
@@ -3759,8 +3879,13 @@ async function doCreateUser(fd){
 }
 
 // Ya no se asigna una contraseña a mano: Firebase envía a la persona un enlace para que ella cree la suya.
+let _resetUserBusy = false;
 async function doResetUser(){
-  if (!isAdminUser()) return;
+  if (!isAdminUser() || _resetUserBusy) return;
+  _resetUserBusy = true;
+  try{ await _doResetUser(); } finally { _resetUserBusy = false; }
+}
+async function _doResetUser(){
   const user = users.find(u => u.email === userModalState.email);
   if (!user){ userModalState = null; render(); return; }
   try{
@@ -7139,7 +7264,7 @@ function renderRespaldos(){
   root.innerHTML = `<div class="loading-screen"><p style="padding:40px;text-align:center">Cargando…</p></div>`;
   try{
     const fu = await initAuth();            // ¿hay una sesión de Firebase guardada en este navegador?
-    if (fu) await startSession();
+    if (fu && !resetFlow) await startSession();
   }catch(e){
     console.error(e);
     authError = 'No se pudo conectar con el servidor. Revisa tu conexión e intenta de nuevo.';

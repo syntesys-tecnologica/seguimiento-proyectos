@@ -690,6 +690,9 @@ let modalState = null; // { id: number|null, draft: {...} }
 let customReportState = null; // pestaña Proyección: modal del reporte personalizado abierto
 let authView = 'login';
 let authError = '';
+let authNotice = '';
+let authBusy = false;
+let authEmailDraft = '';
 let charts = {};
 let mapInstance = null; // instancia de Leaflet de la pestaña Mapa
 let mapaEstadoFilter = new Set(); // estados activos en el filtro del mapa (vacío = todos)
@@ -1292,17 +1295,15 @@ function getFirebase(){
   if (!_fbReady){
     _fbReady = (async () => {
       const base = 'https://www.gstatic.com/firebasejs/10.13.2/';
-      const { initializeApp } = await import(base + 'firebase-app.js');
+      const appMod = await import(base + 'firebase-app.js');
       const fs = await import(base + 'firebase-firestore.js');
-      const { getAuth, signInAnonymously, onAuthStateChanged } = await import(base + 'firebase-auth.js');
-      const app = initializeApp(FIREBASE_CONFIG);
+      const au = await import(base + 'firebase-auth.js');
+      const app = appMod.initializeApp(FIREBASE_CONFIG);
       const db = fs.getFirestore(app);
-      const auth = getAuth(app);
-      await withTimeout(new Promise((resolve, reject) => {
-        const unsub = onAuthStateChanged(auth, (user) => { if (user){ unsub(); resolve(); } });
-        signInAnonymously(auth).catch(reject);
-      }), 20000, 'inicio de sesión anónima');
-      return { db, doc: fs.doc, getDocFromServer: fs.getDocFromServer, runTransaction: fs.runTransaction };
+      const auth = au.getAuth(app);
+      auth.languageCode = 'es';
+      // Ya NO hay sesión anónima: solo entra quien inicia sesión con correo y contraseña.
+      return { app, appMod, db, fs, auth, au, doc: fs.doc, getDocFromServer: fs.getDocFromServer, runTransaction: fs.runTransaction };
     })().catch(e => { _fbReady = null; throw e; }); // si falla, se podrá reintentar
   }
   return _fbReady;
@@ -1407,7 +1408,7 @@ let dataWarning = '';       // avisos no bloqueantes (p. ej. falta una lista en 
 let saveError = '';         // texto del último error de guardado (se muestra en pantalla)
 // "baseline" = lo último que sabemos que hay en el servidor. Sirve para saber
 // QUÉ cambió esta persona (y solo aplicar eso), sin pisar lo de los demás.
-const baseline = { projects: null, users: null, trash: null, changelogSigs: null };
+const baseline = { projects: null, trash: null, changelogSigs: null };
 const projKey = p => String(p.id);
 const userKey = u => String(u.email || '').toLowerCase();
 
@@ -1444,7 +1445,6 @@ function mergeChangelog(serverList, baseSigs, localList){
 
 const LISTS = {
   projects: { key: 'sy_dc_projects', get: () => projects, set: v => { projects = v; }, keyFn: projKey, conflict: 'reid',       guard: true  },
-  users:    { key: 'sy_dc_users',    get: () => users,    set: v => { users = v; },    keyFn: userKey, conflict: 'keepServer', guard: true, validate: l => l.some(u => u.role === 'admin') },
   trash:    { key: 'sy_dc_trash',    get: () => trash,    set: v => { trash = v; },    keyFn: projKey, conflict: 'keepServer', guard: false },
 };
 // Una cola por clave: los guardados de una misma lista nunca se cruzan.
@@ -1523,7 +1523,6 @@ function replaceList(name, list){
   });
 }
 const persistProjects = () => persistList('projects');
-const persistUsers = () => persistList('users');
 const persistTrash = () => persistList('trash');
 
 // Trae lo del servidor y lo combina con los cambios que esta persona aún no ha guardado.
@@ -1539,92 +1538,47 @@ function applyServerChangelog(serverList){
 function readCore(light){
   return Promise.all([
     storageGet('sy_dc_projects'),
-    storageGet('sy_dc_users'),
     storageGet('sy_dc_changelog'),
     light ? Promise.resolve({ ok: false }) : storageGet('sy_dc_city_coords'),
     light ? Promise.resolve({ ok: false }) : storageGet('sy_dc_trash'),
   ]);
 }
 
+// Carga los datos compartidos (proyectos, historial, papelera). Se llama DESPUÉS de iniciar sesión.
 async function loadAll(){
   dataReady = false; loadError = false; dataWarning = '';
-  const [pRes, uRes, cRes, geoRes, trashRes] = await readCore(false);
+  const [pRes, cRes, geoRes, trashRes] = await readCore(false);
   if (geoRes.ok && geoRes.value && typeof geoRes.value === 'object') cityCoordsCache = geoRes.value;
 
-  // Si CUALQUIER lectura crítica falla, no se toca nada: ni se siembran datos
-  // por defecto ni se guarda. La pantalla mostrará "Reintentar".
-  if (!pRes.ok || !uRes.ok || !cRes.ok || !trashRes.ok){ loadError = true; return; }
+  // Si CUALQUIER lectura crítica falla, no se toca nada ni se guarda nada.
+  if (!pRes.ok || !cRes.ok || !trashRes.ok){ loadError = true; return; }
 
-  let pList = pRes.value, uList = uRes.value;
-  const firstUse = !pRes.exists && !uRes.exists;
-
-  if (firstUse){
-    // Único caso en que se crean datos por defecto: el servidor confirma que no hay NADA.
-    const seed = SEED_PROJECTS.map(sp => ({
-      ...sp,
-      tuberia: Math.round((Number(sp.tuberia)||0)*100),
-      cableado: Math.round((Number(sp.cableado)||0)*100),
-      equipos: Math.round((Number(sp.equipos)||0)*100),
-      lastModifiedBy: 'Importación inicial',
-      lastModifiedAt: new Date().toISOString(),
-    }));
-    seed.forEach(pr => pr.avance = computeAvance(pr));
-    const admin = [{
-      name: 'Andres Felipe Florez',
-      email: 'andres.florez@syntesys.co',
-      passHash: simpleHash('Syntesys2026+'),
-      role: 'admin',
-      createdAt: new Date().toISOString(),
-    }];
-    const rp = await storageMutate('sy_dc_projects', cur => cur ? undefined : seed);   // crear solo si no existe
-    const ru = await storageMutate('sy_dc_users', cur => cur ? undefined : admin);
-    if (!rp.ok || !ru.ok){ loadError = true; return; }
-    await storageSet('sy_dc_initialized', true);
-    pList = rp.value; uList = ru.value;
-  } else {
-    if (!pRes.exists){
+  let pList = pRes.value;
+  if (!pRes.exists){
+    if (!cRes.exists && !trashRes.exists && isAdminUser()){
+      // Base de datos totalmente nueva: se cargan los proyectos iniciales (solo crea si no existe).
+      const seed = SEED_PROJECTS.map(sp => ({
+        ...sp,
+        tuberia: Math.round((Number(sp.tuberia)||0)*100),
+        cableado: Math.round((Number(sp.cableado)||0)*100),
+        equipos: Math.round((Number(sp.equipos)||0)*100),
+        lastModifiedBy: 'Importación inicial',
+        lastModifiedAt: new Date().toISOString(),
+      }));
+      seed.forEach(pr => pr.avance = computeAvance(pr));
+      const rp = await storageMutate('sy_dc_projects', cur => cur ? undefined : seed);
+      if (!rp.ok){ loadError = true; return; }
+      pList = rp.value;
+    } else {
       pList = [];
-      dataWarning = 'No se encontró la lista de proyectos en la base de datos. NO se creó ni se sobrescribió nada. Un administrador puede recuperarla desde Usuarios → Respaldos.';
-    }
-    if (!uRes.exists || !Array.isArray(uList) || !uList.length){
-      // Sin usuarios nadie podría entrar: se agrega SOLO el admin por defecto (sin borrar nada).
-      const admin = {
-        name: 'Andres Felipe Florez',
-        email: 'andres.florez@syntesys.co',
-        passHash: simpleHash('Syntesys2026+'),
-        role: 'admin',
-        createdAt: new Date().toISOString(),
-      };
-      const ru = await storageMutate('sy_dc_users', cur => (Array.isArray(cur) && cur.length) ? undefined : [admin]);
-      if (!ru.ok){ loadError = true; return; }
-      uList = ru.value;
-      dataWarning = 'La lista de usuarios estaba vacía o no existía; se creó solo el administrador por defecto. Un administrador puede recuperar el resto desde Usuarios → Respaldos.';
+      dataWarning = 'No se encontró la lista de proyectos en la base de datos. NO se creó ni se sobrescribió nada. Un administrador puede recuperarla desde la pestaña Respaldos.';
     }
   }
-
   projects = Array.isArray(pList) ? clone(pList) : []; baseline.projects = clone(projects);
-  users = clone(uList);                                baseline.users = clone(users);
   trash = Array.isArray(trashRes.value) ? clone(trashRes.value) : []; baseline.trash = clone(trash);
   changelog = Array.isArray(cRes.value) ? cRes.value : [];            baseline.changelogSigs = new Set(changelog.map(sigOf));
   dataReady = true;
-
-  // Migración: usuarios creados antes de existir roles quedan como 'user'.
-  let migrated = false;
-  users.forEach(x => { if (!x.role){ x.role = 'user'; migrated = true; } });
-  if (migrated) await persistList('users');
   if (purgeOldTrash()) await persistList('trash');
-
-  // Restaurar sesión activa (si existe).
-  const sessionEmail = await restoreSession();
-  if (sessionEmail){
-    const u = users.find(x => x.email.toLowerCase() === sessionEmail.toLowerCase());
-    if (u){
-      currentUser = { name: u.name, email: u.email, role: u.role || 'user', tabAccess: u.tabAccess || null };
-      activeTab = 'resumen';
-    } else {
-      await clearSession();
-    }
-  }
 }
 
 /* ---------- Respaldos automáticos diarios (30 días) ---------- */
@@ -1632,18 +1586,19 @@ const BACKUP_RETENTION_DAYS = 30;
 const BACKUP_NAMES = ['projects', 'users', 'trash'];
 const dayKey = (offset) => new Date(Date.now() - (offset || 0) * 86400000).toISOString().slice(0, 10);
 const bkKey = (day, name) => `bk_${day}_${name}`;
-// La primera persona que entra cada día (con datos confirmados) crea el respaldo del día.
+// Cada día, la primera persona que entra (con datos confirmados) crea el respaldo del día.
+// Los usuarios los respalda quien puede ver la lista completa (admin / supervisor).
 async function ensureDailyBackup(){
   try{
-    if (!dataReady) return;
+    if (!dataReady || !currentUser) return;
     const day = dayKey();
-    const mark = await storageGet(bkKey(day, 'users'));
-    if (!mark.ok || mark.exists) return;
-    const ok1 = await storageSet(bkKey(day, 'projects'), baseline.projects || []);
-    const ok2 = await storageSet(bkKey(day, 'trash'), baseline.trash || []);
-    if (!ok1 || !ok2) return;
-    await storageSet(bkKey(day, 'users'), baseline.users || []);   // "users" va al final: marca el respaldo completo
-    // Los respaldos NO se borran nunca (las reglas de Firestore no permiten eliminar). Ocupan muy poco espacio.
+    const plan = [['projects', baseline.projects], ['trash', baseline.trash]];
+    if (canListUsers(currentUser)) plan.push(['users', users]);
+    for (const [name, data] of plan){
+      if (!data) continue;
+      const mark = await storageGet(bkKey(day, name));
+      if (mark.ok && !mark.exists) await storageSet(bkKey(day, name), data);
+    }
   }catch(e){ console.error('backup failed', e); }
 }
 
@@ -1667,27 +1622,25 @@ function purgeOldTrash(){
 // guardado. Si una lectura falla o el documento no existe, no se toca nada.
 async function pullServerData(light){
   await idle();
-  const [pRes, uRes, cRes, geoRes, trashRes] = await readCore(light);
+  const [pRes, cRes, geoRes, trashRes] = await readCore(light);
   if (pRes.ok && pRes.exists && Array.isArray(pRes.value)) applyServerList('projects', pRes.value);
-  if (uRes.ok && uRes.exists && Array.isArray(uRes.value)) applyServerList('users', uRes.value);
   if (cRes.ok && Array.isArray(cRes.value)) applyServerChangelog(cRes.value);
   if (!light){
     if (geoRes.ok && geoRes.value && typeof geoRes.value === 'object') cityCoordsCache = { ...cityCoordsCache, ...geoRes.value };
     if (trashRes.ok && Array.isArray(trashRes.value)) applyServerList('trash', trashRes.value);
     if (purgeOldTrash()) await persistList('trash');
   }
-  loadError = !pRes.ok || !uRes.ok || !cRes.ok;
+  loadError = !pRes.ok || !cRes.ok;
 }
-async function syncCurrentUser(){
+// Revisa que la cuenta siga activa y con el mismo rol; si la desactivaron, cierra la sesión.
+async function syncCurrentUser(full){
   if (!currentUser) return;
-  const fresh = users.find(x => x.email.toLowerCase() === currentUser.email.toLowerCase());
-  if (fresh){
-    currentUser = { name: fresh.name, email: fresh.email, role: fresh.role || 'user', tabAccess: fresh.tabAccess || null };
-    if (!hasTabAccess(currentUser, activeTab)) activeTab = 'resumen';
-  } else {
-    currentUser = null; authView = 'login';
-    await clearSession();
-  }
+  const r = await loadProfile(currentUser.email);
+  if (!r.ok) return;                                   // sin conexión: no se cambia nada
+  if (!r.profile || r.profile.active === false){ await forceLogout('Tu acceso a la plataforma fue desactivado.'); return; }
+  currentUser = { name: r.profile.name, email: r.profile.email, role: r.profile.role, tabAccess: r.profile.tabAccess };
+  if (!hasTabAccess(currentUser, activeTab)) activeTab = 'resumen';
+  if (full) await refreshUsers();
 }
 async function refreshData(){
   if (isRefreshing) return;
@@ -1695,38 +1648,189 @@ async function refreshData(){
   render();
   try{
     if (!dataReady){ await loadAll(); }
-    else { await pullServerData(false); await syncCurrentUser(); }
+    else { await pullServerData(false); }
+    await syncCurrentUser(true);
   } finally {
     isRefreshing = false;
     render();
   }
 }
 async function retrySave(){
-  await Promise.all([persistList('projects'), persistList('users'), persistList('trash'), persistChangelog()]);
+  await Promise.all([persistList('projects'), persistList('trash'), persistChangelog()]);
   render();
 }
 
-/* ---------- Sesión persistente (para no deslogear en cada recarga) ---------- */
-// La sesión se guarda en almacenamiento PERSONAL (no compartido) de este
-// navegador/usuario, para que cada quien mantenga su propia sesión activa
-// aunque la app se vuelva a cargar (por ejemplo al guardar un proyecto,
-// crear un usuario, o reabrir la pestaña).
-async function saveSession(email){
-  try{ localStorage.setItem('sy_dc_session', JSON.stringify({ email })); }
-  catch(e){ console.error('no se pudo guardar la sesión', e); }
+/* ---------- Autenticación (Firebase Authentication) ---------- */
+// Las contraseñas las gestiona Firebase Authentication: NUNCA se guardan en
+// la base de datos. En Firestore solo queda el perfil de cada persona
+// (colección "usuarios"): nombre, correo, rol, pestañas y si está activa.
+const userDocId = e => String(e || '').trim().toLowerCase();
+const ROLES_OK = ['admin', 'supervisor', 'user'];
+function normProfile(id, d){
+  return {
+    name: d.name || id,
+    email: d.email || id,
+    role: ROLES_OK.includes(d.role) ? d.role : 'user',
+    tabAccess: d.tabAccess && Object.keys(d.tabAccess).length ? d.tabAccess : null,
+    active: d.active !== false,
+    createdAt: d.createdAt || null,
+    createdBy: d.createdBy || null,
+  };
 }
-async function clearSession(){
-  try{ localStorage.removeItem('sy_dc_session'); }
-  catch(e){ /* si no existía, no pasa nada */ }
+// Quién puede ver la lista completa de personas (debe coincidir con las reglas de Firestore).
+const canListUsers = u => !!u && (u.role === 'admin' || u.role === 'supervisor' || hasTabAccess(u, 'usuarios'));
+const activeAdmins = () => users.filter(u => u.role === 'admin' && u.active !== false);
+
+function friendlyAuthError(e){
+  const c = (e && e.code) || '';
+  if (/invalid-credential|wrong-password|user-not-found|invalid-login/.test(c)) return 'Correo o contraseña incorrectos.';
+  if (/too-many-requests/.test(c)) return 'Demasiados intentos fallidos. Espera unos minutos o restablece tu contraseña.';
+  if (/network-request-failed/.test(c)) return 'Sin conexión con el servidor. Revisa tu internet e intenta de nuevo.';
+  if (/email-already-in-use/.test(c)) return 'Ya existe una cuenta con ese correo.';
+  if (/weak-password/.test(c)) return 'La contraseña es muy débil (mínimo 6 caracteres).';
+  if (/invalid-email/.test(c)) return 'El correo no es válido.';
+  if (/requires-recent-login/.test(c)) return 'Por seguridad, vuelve a iniciar sesión e intenta de nuevo.';
+  if (/permission-denied/.test(c)) return 'No tienes permiso para realizar esta acción.';
+  return 'No se pudo completar la acción' + (c ? ` (${c})` : '') + '. Intenta de nuevo.';
 }
-async function restoreSession(){
+
+async function loadProfile(email){
   try{
-    const raw = localStorage.getItem('sy_dc_session');
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    return data && data.email ? data.email : null;
-  }catch(e){ return null; }
+    const { db, doc, getDocFromServer } = await getFirebase();
+    const id = userDocId(email);
+    const snap = await withTimeout(getDocFromServer(doc(db, 'usuarios', id)), 20000, 'perfil de usuario');
+    return { ok: true, profile: snap.exists() ? normProfile(id, snap.data()) : null };
+  }catch(e){ console.error('loadProfile failed', e); return { ok: false, profile: null, error: e }; }
 }
+async function loadAllProfiles(){
+  try{
+    const { db, fs } = await getFirebase();
+    const snap = await withTimeout(fs.getDocsFromServer(fs.collection(db, 'usuarios')), 20000, 'lista de usuarios');
+    const list = [];
+    snap.forEach(d => list.push(normProfile(d.id, d.data())));
+    list.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    return { ok: true, list };
+  }catch(e){ console.error('loadAllProfiles failed', e); return { ok: false, list: [], error: e }; }
+}
+async function refreshUsers(){
+  if (!currentUser) return;
+  if (canListUsers(currentUser)){
+    const r = await loadAllProfiles();
+    if (r.ok) users = r.list;
+  } else {
+    const r = await loadProfile(currentUser.email);
+    if (r.ok && r.profile) users = [r.profile];
+  }
+}
+// Crea o completa el perfil (nunca borra nada).
+async function writeProfile(p){
+  const { db, doc, fs } = await getFirebase();
+  const id = userDocId(p.email);
+  const now = new Date().toISOString();
+  await fs.setDoc(doc(db, 'usuarios', id), {
+    name: p.name, email: id, role: p.role, tabAccess: p.tabAccess || {}, active: p.active !== false,
+    createdAt: p.createdAt || now, createdBy: p.createdBy || (currentUser ? currentUser.email : null),
+    updatedAt: now, updatedBy: currentUser ? currentUser.email : null,
+  }, { merge: true });
+}
+async function patchProfile(email, fields){
+  const { db, doc, fs } = await getFirebase();
+  await fs.setDoc(doc(db, 'usuarios', userDocId(email)), { ...fields, updatedAt: new Date().toISOString(), updatedBy: currentUser ? currentUser.email : null }, { merge: true });
+}
+// Crea la cuenta de acceso en Firebase Authentication usando una app secundaria,
+// para que el administrador NO pierda su propia sesión.
+async function createAuthAccount(email, password){
+  const { appMod, au } = await getFirebase();
+  let sec; try{ sec = appMod.getApp('sec'); }catch(e){ sec = appMod.initializeApp(FIREBASE_CONFIG, 'sec'); }
+  const secAuth = au.getAuth(sec); secAuth.languageCode = 'es';
+  try{
+    await au.createUserWithEmailAndPassword(secAuth, email, password);
+    return { created: true };
+  }catch(e){
+    if (e && e.code === 'auth/email-already-in-use') return { created: false };
+    throw e;
+  }finally{ try{ await au.signOut(secAuth); }catch(e){} }
+}
+async function sendResetEmail(email){
+  const { auth, au } = await getFirebase();
+  await au.sendPasswordResetEmail(auth, userDocId(email));
+}
+function randomPassword(){
+  const c = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  const a = new Uint32Array(16); crypto.getRandomValues(a);
+  return Array.from(a, x => c[x % c.length]).join('') + '#9';
+}
+// Da de alta a alguien que ya existía (usuarios anteriores o de una copia): cuenta + perfil + correo para crear su contraseña.
+async function provisionRecord(rec){
+  const email = userDocId(rec.email);
+  const r = await createAuthAccount(email, randomPassword());
+  await writeProfile({ name: rec.name || email, email, role: ROLES_OK.includes(rec.role) ? rec.role : 'user', tabAccess: rec.tabAccess || {}, createdAt: rec.createdAt });
+  if (r.created){ try{ await sendResetEmail(email); }catch(e){ console.error('reset mail failed', e); } }
+  return r.created;
+}
+
+/* Sesión: Firebase la mantiene (aunque se recargue la página). */
+async function initAuth(){
+  const { auth, au } = await withTimeout(getFirebase(), 20000, 'conexión con Firebase');
+  return new Promise(resolve => { const unsub = au.onAuthStateChanged(auth, u => { unsub(); resolve(u); }); });
+}
+function resetSessionState(){
+  currentUser = null; authView = 'login'; activeTab = 'resumen';
+  projects = []; users = []; trash = []; changelog = [];
+  baseline.projects = baseline.trash = baseline.changelogSigs = null;
+  dataReady = false; loadError = false; dataWarning = ''; saveError = '';
+  legacyUsers = []; userModalState = null; userActionNotice = null; userActionError = '';
+  backupsState = { loading: false, days: [], msg: '', pendingFile: null };
+}
+async function fbSignOut(){
+  try{ await idle(); const { auth, au } = await getFirebase(); await au.signOut(auth); }catch(e){ console.error('signOut failed', e); }
+  clearSession();
+}
+async function doLogout(){ await fbSignOut(); resetSessionState(); render(); }
+async function forceLogout(msg){ await fbSignOut(); resetSessionState(); authError = msg; render(); }
+async function clearSession(){ try{ localStorage.removeItem('sy_dc_session'); }catch(e){} }  // sesión antigua (ya no se usa)
+
+// Verifica el perfil de la persona que inició sesión y carga los datos.
+async function startSession(){
+  const { auth } = await getFirebase();
+  const fu = auth.currentUser;
+  if (!fu) return false;
+  const email = userDocId(fu.email);
+  const r = await loadProfile(email);
+  if (!r.ok){ authError = 'No se pudo verificar tu cuenta. Revisa tu conexión e intenta de nuevo.'; return false; }
+  if (!r.profile){ authError = 'Tu cuenta aún no tiene acceso a la plataforma. Pide al administrador que te registre.'; await fbSignOut(); return false; }
+  if (r.profile.active === false){ authError = 'Tu acceso a la plataforma está desactivado. Contacta al administrador.'; await fbSignOut(); return false; }
+  currentUser = { name: r.profile.name, email: r.profile.email, role: r.profile.role, tabAccess: r.profile.tabAccess };
+  activeTab = 'resumen';
+  await loadAll();
+  await refreshUsers();
+  return true;
+}
+async function doLogin(fd){
+  const email = userDocId(fd.get('email'));
+  const password = String(fd.get('password'));
+  authEmailDraft = email; authNotice = ''; authError = ''; authBusy = true; render();
+  try{
+    const { auth, au } = await getFirebase();
+    await au.signInWithEmailAndPassword(auth, email, password);
+    await startSession();
+  }catch(e){ authError = friendlyAuthError(e); }
+  authBusy = false; render();
+  if (currentUser){ ensureDailyBackup(); checkLegacyUsers(); }
+}
+async function doForgotPassword(){
+  const input = document.querySelector('.auth-form input[name="email"]');
+  const email = input ? userDocId(input.value) : '';
+  authNotice = ''; authError = '';
+  if (!email){ authError = 'Escribe tu correo en el campo de arriba y pulsa de nuevo “¿Olvidaste tu contraseña?”.'; render(); return; }
+  authEmailDraft = email;
+  try{
+    await sendResetEmail(email);
+    authNotice = 'Si el correo está registrado, recibirás un mensaje con un enlace para crear una nueva contraseña. Revisa también la carpeta de spam.';
+  }catch(e){ authError = friendlyAuthError(e); }
+  render();
+}
+
 
 function logChange(entry){
   changelog.unshift({ ts: new Date().toISOString(), user: currentUser ? currentUser.name : 'Sistema', userEmail: currentUser ? currentUser.email : null, ...entry });
@@ -1780,11 +1884,7 @@ function render(){
 
 /* ================= AUTENTICACIÓN ================= */
 function renderAuth(){
-  let body = '';
-  if (!dataReady) body = `
-    <div class="auth-error">No se pudo conectar con la base de datos para confirmar la información guardada. Por seguridad no se muestra ni se modifica nada (así no se pierde información).</div>
-    <button class="btn btn-primary btn-block" data-action="retry-load">Reintentar</button>`;
-  else if (authView === 'login') body = authLoginView();
+  let body = authView === 'login' ? authLoginView() : '';
 
   return `
   <div class="auth-screen">
@@ -1803,12 +1903,14 @@ function authLoginView(){
   return `
     <form data-action-submit="do-login" class="auth-form">
       ${authError ? `<div class="auth-error">${esc(authError)}</div>` : ''}
+      ${authNotice ? `<div class="auth-simulated-email"><p>${esc(authNotice)}</p></div>` : ''}
       <label class="field-label">Correo corporativo</label>
-      <input class="text-input" type="email" name="email" placeholder="nombre@syntesys.co" required />
+      <input class="text-input" type="email" name="email" value="${esc(authEmailDraft)}" placeholder="nombre@syntesys.co" required />
       <label class="field-label">Contraseña</label>
       <input class="text-input" type="password" name="password" placeholder="••••••••" required />
-      <button class="btn btn-primary btn-block" type="submit">Ingresar</button>
+      <button class="btn btn-primary btn-block" type="submit" ${authBusy ? 'disabled' : ''}>${authBusy ? 'Ingresando…' : 'Ingresar'}</button>
       <div class="auth-links">
+        <button type="button" class="btn btn-text" data-action="forgot-password">¿Olvidaste tu contraseña?</button>
       </div>
     </form>
     <p class="auth-hint">Si perdiste tus credenciales, contacta al administrador de la plataforma.<br /><a href="https://outlook.office.com/mail/deeplink/compose?to=andres.florez@syntesys.co" target="_blank" rel="noopener">andres.florez@syntesys.co</a></p>
@@ -2508,8 +2610,8 @@ function renderUsuarios(){
         <div>
           <h3 class="chart-title" style="margin-bottom:2px">Personas con acceso a la plataforma</h3>
           <p class="auth-note">${isAdmin
-            ? 'Aquí ves todas las personas registradas en el sistema: puedes crear cuentas, editar sus datos, restablecer una contraseña olvidada, cambiar su rol o quitarles el acceso.'
-            : 'Aquí puedes consultar qué personas están registradas y con qué rol. Crear cuentas, editar, restablecer contraseñas o eliminar accesos es exclusivo del perfil administrador.'}</p>
+            ? 'Aquí ves todas las personas registradas en el sistema: puedes crear cuentas, editar sus datos, enviarles un enlace para restablecer su contraseña, cambiar su rol o desactivar su acceso. Las cuentas nunca se eliminan: se desactivan y se pueden reactivar.'
+            : 'Aquí puedes consultar qué personas están registradas y con qué rol. Crear cuentas, editar, enviar enlaces de contraseña o desactivar accesos es exclusivo del perfil administrador.'}</p>
         </div>
         ${isAdmin ? `
         <div class="toolbar-right">
@@ -2526,13 +2628,18 @@ function renderUsuarios(){
         </div>
       ` : ''}
 
+      ${isAdmin && legacyUsers.length ? `
+        <div class="auth-error" style="margin-bottom:16px">
+          <p>Hay <b>${legacyUsers.length}</b> usuario(s) del sistema anterior sin migrar (${esc(legacyUsers.map(x => x.email).join(', '))}). Al migrarlos, cada persona recibe un correo para crear su nueva contraseña.</p>
+          <button class="btn btn-primary" data-action="migrate-legacy" style="margin-top:8px">Migrar usuarios anteriores</button>
+        </div>` : ''}
       <div class="table-wrap">
         <table class="data-table">
           <thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Pestañas</th><th>Creado</th>${isAdmin ? '<th></th>' : ''}</tr></thead>
           <tbody>
             ${users.map(u => `
-              <tr>
-                <td class="cell-strong">${esc(u.name)}</td>
+              <tr style="${u.active === false ? 'opacity:.55' : ''}">
+                <td class="cell-strong">${esc(u.name)}${u.active === false ? ' <span class="status-pill" style="--chip-color:#8c8c86">Desactivada</span>' : ''}</td>
                 <td>${esc(u.email)}</td>
                 <td><span class="status-pill" style="--chip-color:${roleChipColor(u.role)}">${roleLabel(u.role)}</span></td>
                 <td class="cell-sub">${u.role === 'admin' ? 'Todas' : `${ALL_TAB_DEFS.filter(([k])=>hasTabAccess(u,k)).length} de ${ALL_TAB_DEFS.length}`}</td>
@@ -2540,24 +2647,26 @@ function renderUsuarios(){
                 ${isAdmin ? `
                 <td class="cell-actions">
                   <button class="btn btn-text" data-action="open-edit-user" data-email="${esc(u.email)}">Editar</button>
-                  <button class="btn btn-text" data-action="open-reset-user" data-email="${esc(u.email)}">Restablecer contraseña</button>
-                  <button class="btn btn-text btn-text-danger" data-action="confirm-delete-user" data-email="${esc(u.email)}">Eliminar</button>
+                  <button class="btn btn-text" data-action="open-reset-user" data-email="${esc(u.email)}">Enviar enlace de contraseña</button>
+                  ${u.active === false
+                    ? `<button class="btn btn-text" data-action="reactivate-user" data-email="${esc(u.email)}">Reactivar</button>`
+                    : `<button class="btn btn-text btn-text-danger" data-action="confirm-delete-user" data-email="${esc(u.email)}">Desactivar</button>`}
                 </td>` : ''}
               </tr>
             `).join('')}
           </tbody>
         </table>
       </div>
-      <div class="table-footnote">${users.length} persona(s) con acceso</div>
+      <div class="table-footnote">${users.filter(u => u.active !== false).length} persona(s) con acceso · ${users.filter(u => u.active === false).length} desactivada(s)</div>
     </section>
   `;
 }
 
 function renderUserModal(){
   const mode = userModalState.mode; // 'new' | 'reset' | 'edit' | 'self'
-  const titles = { new:'Nueva persona', reset:'Restablecer contraseña', edit:'Editar persona', self:'Cambiar mi contraseña' };
+  const titles = { new:'Nueva persona', reset:'Enviar enlace de contraseña', edit:'Editar persona', self:'Cambiar mi contraseña' };
   const submitActions = { new:'do-create-user', reset:'do-reset-user', edit:'do-edit-user', self:'do-change-own-password' };
-  const submitLabels = { new:'Crear persona', reset:'Restablecer contraseña', edit:'Guardar cambios', self:'Cambiar contraseña' };
+  const submitLabels = { new:'Crear persona', reset:'Enviar correo', edit:'Guardar cambios', self:'Cambiar contraseña' };
   const editingUser = mode !== 'new' ? users.find(u => u.email === userModalState.email) : null;
   // 'new' arranca con el rol "Usuario" seleccionado por defecto en el <select>,
   // así que sus checkboxes parten del acceso por defecto de ese rol; en
@@ -2606,7 +2715,7 @@ function renderUserModal(){
           </div>
           <div class="field">
             <label>Correo corporativo</label>
-            <input type="email" name="email" value="${esc(editingUser ? editingUser.email : '')}" required />
+            <input type="email" name="email" value="${esc(editingUser ? editingUser.email : '')}" readonly title="El correo identifica la cuenta y no se puede cambiar" />
           </div>
           <div class="field">
             <label>Rol</label>
@@ -2620,11 +2729,7 @@ function renderUserModal(){
         ` : ''}
 
         ${mode === 'reset' ? `
-          <p class="auth-note">Se asignará una nueva contraseña temporal a <strong>${esc(userModalState.email)}</strong>. Compártela con la persona por un medio seguro.</p>
-          <div class="field">
-            <label>Nueva contraseña temporal</label>
-            <input type="text" name="password" minlength="6" required placeholder="Mínimo 6 caracteres" />
-          </div>
+          <p class="auth-note">Se enviará un correo a <strong>${esc(userModalState.email)}</strong> con un enlace para que la persona cree su propia contraseña. Tú no necesitas conocerla.</p>
         ` : ''}
 
         ${mode === 'self' ? `
@@ -2635,7 +2740,7 @@ function renderUserModal(){
           </div>
           <div class="field">
             <label>Nueva contraseña</label>
-            <input type="text" name="newPassword" minlength="6" required placeholder="Mínimo 6 caracteres" />
+            <input type="password" name="newPassword" minlength="6" required placeholder="Mínimo 6 caracteres" />
           </div>
         ` : ''}
 
@@ -2674,12 +2779,12 @@ function renderConfirmDeleteUser(){
   return `
   <div class="modal-overlay" data-action="cancel-delete-user">
     <div class="modal-card modal-card-sm" data-stop-close>
-      <div class="modal-header"><h2>Quitar acceso</h2></div>
+      <div class="modal-header"><h2>Desactivar acceso</h2></div>
       <div class="modal-form">
-        <p>¿Seguro que deseas eliminar el acceso de <strong>${esc(u.name)}</strong> (${esc(u.email)})? Podrás volver a crear la cuenta más adelante si es necesario.</p>
+        <p>¿Seguro que deseas desactivar el acceso de <strong>${esc(u.name)}</strong> (${esc(u.email)})? La cuenta no se elimina: quedará guardada y podrás reactivarla cuando quieras.</p>
         <div class="modal-footer">
           <button class="btn btn-text" data-action="cancel-delete-user">Cancelar</button>
-          <button class="btn btn-danger" data-action="do-delete-user">Eliminar acceso</button>
+          <button class="btn btn-danger" data-action="do-delete-user">Desactivar acceso</button>
         </div>
       </div>
     </div>
@@ -3377,22 +3482,30 @@ function onRootClick(e){
     case 'delete-saved-filter': deleteSavedFilter(Number(btn.dataset.filterId)); break;
     case 'logout':
       if (confirm('¿Estás seguro de que deseas salir de la aplicación?')) {
-        currentUser=null; authView='login'; clearSession(); render();
+        doLogout();
       }
       break;
     case 'retry-load': refreshData(); break;
+    case 'forgot-password': doForgotPassword(); break;
+    case 'reactivate-user': doReactivateUser(btn.dataset.email); break;
+    case 'migrate-legacy': migrateLegacyUsers(); break;
     case 'retry-save': retrySave(); break;
     case 'restore-backup': restoreFromBackup(btn.dataset.day, btn.dataset.name); break;
     case 'download-backup-json': exportBackupJSON(); break;
     case 'apply-file-merge': applyBackupFile('merge'); break;
     case 'apply-file-replace':
-      if (confirm('Esto reemplazará TODOS los proyectos y usuarios actuales por los de la copia. Antes se descargará una copia de lo actual. ¿Continuar?')) applyBackupFile('replace');
+      if (confirm('Esto reemplazará TODOS los proyectos actuales por los de la copia (las personas nunca se reemplazan ni se borran). Antes se descargará una copia de lo actual. ¿Continuar?')) applyBackupFile('replace');
       break;
     case 'cancel-file': if (backupsState) backupsState.pendingFile = null; render(); break;
     case 'set-tab':
       if (btn.dataset.tab === 'respaldos'){
         if (!currentUser || currentUser.role !== 'admin') break;   // solo administrador
         activeTab = 'respaldos'; openBackups(); break;
+      }
+      if (btn.dataset.tab === 'usuarios'){
+        activeTab = 'usuarios'; render();
+        refreshUsers().then(() => { checkLegacyUsers(); render(); });
+        break;
       }
       activeTab = btn.dataset.tab; render(); break;
     case 'open-new-project':
@@ -3578,160 +3691,169 @@ function onRootSubmit(e){
   if (action === 'do-change-own-password') return doChangeOwnPassword(fd);
 }
 
-/* ---------- Lógica de autenticación ---------- */
-function doLogin(fd){
-  const email = String(fd.get('email')).trim().toLowerCase();
-  const password = String(fd.get('password'));
-  const user = users.find(u => u.email.toLowerCase() === email);
-  if (!user || user.passHash !== simpleHash(password)){
-    authError = 'Correo o contraseña incorrectos.';
-    render(); return;
-  }
-  currentUser = { name: user.name, email: user.email, role: user.role || 'user', tabAccess: user.tabAccess || null };
-  authError = '';
-  activeTab = 'resumen';
-  saveSession(user.email);
-  render();
-}
-
 /* ---------- Lógica de administración de usuarios ---------- */
 async function doCreateUser(fd){
   const name = String(fd.get('name')).trim();
-  const email = String(fd.get('email')).trim().toLowerCase();
+  const email = userDocId(fd.get('email'));
   const password = String(fd.get('password'));
   const roleRaw = String(fd.get('role') || '');
-  const role = ['admin','supervisor','user'].includes(roleRaw) ? roleRaw : 'user';
+  const role = ROLES_OK.includes(roleRaw) ? roleRaw : 'user';
   const tabAccess = readTabAccessFromForm(fd);
+  if (!isAdminUser()) return;
   if (!name || !email || password.length < 6){
     userActionError = 'Completa todos los campos (contraseña de mínimo 6 caracteres).';
     render(); return;
   }
-  if (users.some(u => u.email.toLowerCase() === email)){
-    userActionError = 'Ya existe una cuenta registrada con ese correo.';
+  const exists = users.find(u => userDocId(u.email) === email);
+  if (exists){
+    userActionError = exists.active === false
+      ? 'Esa persona ya está registrada pero desactivada. Usa “Reactivar” en la lista.'
+      : 'Ya existe una cuenta registrada con ese correo.';
     render(); return;
   }
-  users.push({ name, email, passHash: simpleHash(password), role, tabAccess, createdAt: new Date().toISOString() });
-  await persistUsers();
-  logChange({ project:'—', text:`Creó el acceso de ${name} (${email}) como ${roleLabel(role).toLowerCase()}.` });
-  userModalState = null;
-  userActionNotice = { title:'Persona creada', code: password, body: `Comparte esta contraseña temporal con ${name} por un canal seguro (no por este medio). Podrá iniciar sesión con ${email}.` };
+  try{
+    const r = await createAuthAccount(email, password);
+    await writeProfile({ name, email, role, tabAccess });
+    logChange({ project:'—', text:`Creó el acceso de ${name} (${email}) como ${roleLabel(role).toLowerCase()}.` });
+    userModalState = null; userActionError = '';
+    userActionNotice = r.created
+      ? { title:'Persona creada', code: password, body: `Comparte esta contraseña temporal con ${name} por un canal seguro (no por este medio). Podrá iniciar sesión con ${email} y cambiarla desde su perfil.` }
+      : { title:'Persona registrada', code: email, body: `${name} ya tenía una cuenta de acceso en Firebase y conserva su contraseña. Si no la recuerda, usa “Enviar enlace de contraseña”.` };
+  }catch(e){
+    console.error(e);
+    userActionError = friendlyAuthError(e);
+  }
+  await refreshUsers();
   render();
 }
 
-async function doResetUser(fd){
-  const password = String(fd.get('password'));
-  if (password.length < 6){
-    userActionError = 'La contraseña debe tener al menos 6 caracteres.';
-    render(); return;
-  }
+// Ya no se asigna una contraseña a mano: Firebase envía a la persona un enlace para que ella cree la suya.
+async function doResetUser(){
+  if (!isAdminUser()) return;
   const user = users.find(u => u.email === userModalState.email);
-  if (user){
-    user.passHash = simpleHash(password);
-    await persistUsers();
-    logChange({ project:'—', text:`Restableció la contraseña de ${user.name} (${user.email}).` });
-    userModalState = null;
-    userActionNotice = { title:'Contraseña restablecida', code: password, body: `Comparte esta nueva contraseña temporal con ${user.name} por un canal seguro.` };
-  } else {
-    userModalState = null;
-  }
+  if (!user){ userModalState = null; render(); return; }
+  try{
+    await sendResetEmail(user.email);
+    logChange({ project:'—', text:`Envió un enlace para restablecer la contraseña de ${user.name} (${user.email}).` });
+    userModalState = null; userActionError = '';
+    userActionNotice = { title:'Enlace enviado', code: user.email, body: `Se envió un correo a ${user.email} con un enlace para crear una nueva contraseña. Si no llega, que revise la carpeta de spam.` };
+  }catch(e){ userActionError = friendlyAuthError(e); }
   render();
 }
 
 async function doEditUser(fd){
+  if (!isAdminUser()) return;
   const name = String(fd.get('name')).trim();
-  const email = String(fd.get('email')).trim().toLowerCase();
   const roleRaw = String(fd.get('role') || '');
-  const role = ['admin','supervisor','user'].includes(roleRaw) ? roleRaw : 'user';
+  const role = ROLES_OK.includes(roleRaw) ? roleRaw : 'user';
   const tabAccess = readTabAccessFromForm(fd);
-  if (!name || !email){
-    userActionError = 'Completa el nombre y el correo.';
-    render(); return;
-  }
+  if (!name){ userActionError = 'Completa el nombre.'; render(); return; }
   const user = users.find(u => u.email === userModalState.email);
-  if (!user){
-    userModalState = null; render(); return;
-  }
-  const emailTaken = users.some(u => u !== user && u.email.toLowerCase() === email);
-  if (emailTaken){
-    userActionError = 'Ya existe otra cuenta registrada con ese correo.';
-    render(); return;
-  }
-  // Nunca se puede dejar la plataforma sin al menos un administrador.
-  if (user.role === 'admin' && role !== 'admin' && users.filter(u=>u.role==='admin').length <= 1){
+  if (!user){ userModalState = null; render(); return; }
+  // Nunca se puede dejar la plataforma sin al menos un administrador activo.
+  if (user.role === 'admin' && role !== 'admin' && activeAdmins().length <= 1){
     userActionError = 'Debe existir al menos un administrador. Asigna el rol de administrador a otra persona antes de quitarlo aquí.';
     render(); return;
   }
-
-  const oldName = user.name, oldEmail = user.email, oldRole = user.role || 'user';
+  const oldName = user.name, oldRole = user.role || 'user';
   const oldTabAccess = getUserTabAccess(user);
-  user.name = name;
-  user.email = email;
-  user.role = role;
-  user.tabAccess = tabAccess;
-  await persistUsers();
+  try{
+    await patchProfile(user.email, { name, role, tabAccess: tabAccess || {} });
+  }catch(e){ userActionError = friendlyAuthError(e); render(); return; }
+  user.name = name; user.role = role; user.tabAccess = tabAccess;
 
   const changes = [];
   if (oldName !== name) changes.push(`nombre: "${oldName}" → "${name}"`);
-  if (oldEmail.toLowerCase() !== email) changes.push(`correo: "${oldEmail}" → "${email}"`);
   if (oldRole !== role) changes.push(`rol: "${roleLabel(oldRole)}" → "${roleLabel(role)}"`);
   const tabChanges = describeTabAccessChanges(oldTabAccess, tabAccess);
   if (tabChanges) changes.push(tabChanges);
   logChange({ project:'—', text: changes.length ? `Editó a ${oldName}: ${changes.join(' · ')}.` : `Editó a ${oldName} sin cambios.` });
 
-  // Si la persona se editó a sí misma, actualizamos su sesión activa y la
-  // clave con la que se guarda su sesión persistente para que no se le
-  // cierre la sesión ni pierda el acceso.
-  if (currentUser && currentUser.email.toLowerCase() === oldEmail.toLowerCase()){
+  if (currentUser && currentUser.email.toLowerCase() === user.email.toLowerCase()){
     currentUser = { name: user.name, email: user.email, role: user.role || 'user', tabAccess: user.tabAccess || null };
     if (!hasTabAccess(currentUser, activeTab)) activeTab = 'resumen';
-    await saveSession(user.email);
   }
-
-  userModalState = null;
+  userModalState = null; userActionError = '';
   render();
 }
 
-// Permite que cualquier persona (usuario o administrador) cambie la
-// contraseña con la que inició sesión, sin depender de un administrador.
+// Cada persona cambia su propia contraseña (Firebase pide confirmar la actual).
 async function doChangeOwnPassword(fd){
   const currentPassword = String(fd.get('currentPassword'));
   const newPassword = String(fd.get('newPassword'));
-  const user = users.find(u => u.email === currentUser.email);
-  if (!user){ userModalState = null; render(); return; }
-  if (user.passHash !== simpleHash(currentPassword)){
-    userActionError = 'La contraseña actual no es correcta.';
-    render(); return;
-  }
   if (newPassword.length < 6){
     userActionError = 'La nueva contraseña debe tener al menos 6 caracteres.';
     render(); return;
   }
-  user.passHash = simpleHash(newPassword);
-  await persistUsers();
+  try{
+    const { auth, au } = await getFirebase();
+    const fu = auth.currentUser;
+    await au.reauthenticateWithCredential(fu, au.EmailAuthProvider.credential(fu.email, currentPassword));
+    await au.updatePassword(fu, newPassword);
+  }catch(e){
+    userActionError = /invalid-credential|wrong-password/.test((e && e.code) || '') ? 'La contraseña actual no es correcta.' : friendlyAuthError(e);
+    render(); return;
+  }
   logChange({ project:'—', text:'Cambió su propia contraseña.' });
-  userModalState = null;
+  userModalState = null; userActionError = '';
   render();
   alert('Tu contraseña se actualizó correctamente.');
 }
 
+// Las cuentas NUNCA se eliminan: se desactivan (y se pueden reactivar).
 async function doDeleteUser(){
   const user = users.find(u => u.email === pendingDeleteUserEmail);
-  if (user){
-    if (user.role === 'admin' && users.filter(u=>u.role==='admin').length <= 1){
-      alert('No puedes eliminar al único administrador. Crea u otorga el rol de administrador a otra persona primero.');
-      pendingDeleteUserEmail = null;
-      render(); return;
+  if (user && isAdminUser()){
+    if (user.role === 'admin' && activeAdmins().length <= 1){
+      alert('No puedes desactivar al único administrador. Otorga el rol de administrador a otra persona primero.');
+      pendingDeleteUserEmail = null; render(); return;
     }
-    const wasCurrentUser = currentUser && currentUser.email === user.email;
-    users = users.filter(u => u.email !== pendingDeleteUserEmail);
-    await persistUsers();
-    logChange({ project:'—', text:`Eliminó el acceso de ${user.name} (${user.email}).` });
-    if (wasCurrentUser){
-      currentUser = null; authView = 'login';
-      await clearSession();
-    }
+    try{
+      await patchProfile(user.email, { active: false, deactivatedAt: new Date().toISOString(), deactivatedBy: currentUser.email });
+      user.active = false;
+      logChange({ project:'—', text:`Desactivó el acceso de ${user.name} (${user.email}).` });
+      if (currentUser && currentUser.email.toLowerCase() === user.email.toLowerCase()){
+        pendingDeleteUserEmail = null;
+        await forceLogout('Desactivaste tu propio acceso.');
+        return;
+      }
+    }catch(e){ alert(friendlyAuthError(e)); }
   }
   pendingDeleteUserEmail = null;
+  render();
+}
+async function doReactivateUser(email){
+  if (!isAdminUser()) return;
+  const user = users.find(u => u.email === email);
+  if (!user) return;
+  try{
+    await patchProfile(user.email, { active: true });
+    user.active = true;
+    logChange({ project:'—', text:`Reactivó el acceso de ${user.name} (${user.email}).` });
+  }catch(e){ alert(friendlyAuthError(e)); }
+  render();
+}
+
+/* ---------- Migración de usuarios del sistema anterior ---------- */
+let legacyUsers = [];
+async function checkLegacyUsers(){
+  if (!isAdminUser()) return;
+  const r = await storageGet('sy_dc_users');
+  if (!r.ok || !Array.isArray(r.value)){ legacyUsers = []; return; }
+  const have = new Set(users.map(u => userDocId(u.email)));
+  legacyUsers = r.value.filter(u => u && u.email && !have.has(userDocId(u.email)));
+  if (legacyUsers.length) render();
+}
+async function migrateLegacyUsers(){
+  if (!isAdminUser() || !legacyUsers.length) return;
+  let ok = 0; const failed = [];
+  for (const lu of legacyUsers){
+    try{ await provisionRecord(lu); ok++; }catch(e){ console.error(e); failed.push(lu.email); }
+  }
+  if (ok) logChange({ project:'—', text:`Migró ${ok} usuario(s) del sistema anterior a Firebase Authentication.` });
+  await refreshUsers();
+  legacyUsers = []; await checkLegacyUsers();
+  userActionNotice = { title:'Migración de usuarios', code: `${ok} migrada(s)`, body: (ok ? 'Cada persona recibió un correo para crear su nueva contraseña. ' : '') + (failed.length ? `No se pudieron migrar: ${failed.join(', ')}.` : '') };
   render();
 }
 
@@ -6797,8 +6919,8 @@ async function silentAutoRefresh(){
   isRefreshing = true;
   try{
     await pullServerData(true);
-    await syncCurrentUser();
-    if (isUserCurrentlyEditing()) return;
+    await syncCurrentUser(false);
+    if (!currentUser || isUserCurrentlyEditing()) return;
     const scrollX = window.scrollX, scrollY = window.scrollY;
     render();
     window.scrollTo(scrollX, scrollY);
@@ -6819,7 +6941,7 @@ async function openBackups(){
   backupsState = { loading: true, days: [], msg: '', pendingFile: null };
   render();
   const days = Array.from({ length: BACKUP_RETENTION_DAYS }, (_, i) => dayKey(i));
-  const checks = await Promise.all(days.map(d => storageGet(bkKey(d, 'users'))));
+  const checks = await Promise.all(days.map(d => storageGet(bkKey(d, 'projects'))));
   backupsState = { loading: false, days: days.filter((_, i) => checks[i].ok && checks[i].exists), msg: '' };
   render();
 }
@@ -6838,9 +6960,13 @@ async function mergeMissing(name, list){
     });
     if (added) await persistList('projects');
   } else if (name === 'users'){
-    const have = new Set(users.map(userKey));
-    list.forEach(u => { if (u && u.email && !have.has(userKey(u))){ users.push(u); have.add(userKey(u)); added++; } });
-    if (added) await persistList('users');
+    // Se vuelven a dar de alta (perfil + cuenta + correo para crear contraseña). Nunca se borra a nadie.
+    const have = new Set(users.map(u => userDocId(u.email)));
+    for (const u of list){
+      if (!u || !u.email || have.has(userDocId(u.email))) continue;
+      try{ await provisionRecord(u); have.add(userDocId(u.email)); added++; }catch(e){ console.error(e); }
+    }
+    if (added) await refreshUsers();
   } else if (name === 'trash'){
     const have = new Set(trash.map(t => String(t.id)));
     list.forEach(t => { if (!have.has(String(t.id))){ trash.push(t); have.add(String(t.id)); added++; } });
@@ -6890,17 +7016,13 @@ async function applyBackupFile(mode){
     if (np + nu + nt) logChange({ project: '—', text: `Cargó una copia de seguridad (${pf.name}) y recuperó ${np} proyecto(s), ${nu} usuario(s) y ${nt} de la papelera que faltaban.` });
     msg = `Listo: se agregaron ${np} proyecto(s), ${nu} usuario(s) y ${nt} elemento(s) de papelera que faltaban. No se borró nada.`;
   } else {
-    if (!d.users.some(u => u.role === 'admin')){
-      backupsState.msg = 'Esa copia no tiene ningún administrador; no se reemplazó nada.'; backupsState.pendingFile = null; render(); return;
-    }
     exportBackupJSON('ANTES_de_restaurar');   // red de seguridad: se descarga lo actual
     const ok1 = await replaceList('projects', d.projects);
-    const ok2 = await replaceList('users', d.users);
     if (Array.isArray(d.trash)) await replaceList('trash', d.trash);
-    if (ok1 && ok2){
-      logChange({ project: '—', text: `Reemplazó todo por la copia de seguridad (${pf.name}): ${d.projects.length} proyecto(s) y ${d.users.length} usuario(s).` });
-      msg = 'Listo: el sistema quedó igual que la copia cargada. Antes se descargó automáticamente una copia de lo que había.';
-      await syncCurrentUser();
+    const nu = await mergeMissing('users', d.users);   // las personas nunca se reemplazan ni se borran
+    if (ok1){
+      logChange({ project: '—', text: `Reemplazó los proyectos por la copia de seguridad (${pf.name}): ${d.projects.length} proyecto(s). Personas recuperadas: ${nu}.` });
+      msg = `Listo: los proyectos quedaron iguales a la copia cargada (se recuperaron ${nu} persona(s) que faltaban). Antes se descargó automáticamente una copia de lo que había.`;
     } else msg = 'No se pudo completar el reemplazo. Revisa la conexión e intenta de nuevo.';
   }
   backupsState.pendingFile = null; backupsState.msg = msg;
@@ -6937,13 +7059,13 @@ function renderRespaldos(){
         <p><b>${esc(b.pendingFile.name)}</b> contiene ${b.pendingFile.data.projects.length} proyecto(s) y ${b.pendingFile.data.users.length} usuario(s)${b.pendingFile.data.exportedAt ? ` (copia del ${esc(fmtDateTime(b.pendingFile.data.exportedAt))})` : ''}. ¿Qué deseas hacer?</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
           <button class="btn btn-primary" data-action="apply-file-merge">Agregar solo lo que falta (recomendado)</button>
-          <button class="btn btn-outline" data-action="apply-file-replace">Reemplazar todo por esta copia</button>
+          <button class="btn btn-outline" data-action="apply-file-replace">Reemplazar proyectos por esta copia</button>
           <button class="btn btn-text" data-action="cancel-file">Cancelar</button>
         </div>
       </div>` : ''}
 
     <h4 class="chart-title" style="margin:8px 0">Respaldos automáticos guardados</h4>
-    <p class="auth-note">“Recuperar faltantes” solo AGREGA lo que no esté en el sistema; nunca borra ni reemplaza lo actual.</p>
+    <p class="auth-note">“Recuperar faltantes” solo AGREGA lo que no esté en el sistema; nunca borra ni reemplaza lo actual. Las personas recuperadas reciben un correo para crear su contraseña.</p>
     ${b.loading ? '<p class="empty-row" style="padding:24px 0">Buscando respaldos…</p>'
       : b.days.length ? `
       <div class="table-wrap"><table class="data-table">
@@ -6961,11 +7083,17 @@ function renderRespaldos(){
 
 /* ---------- Arranque ---------- */
 (async function init(){
-  root.innerHTML = `<div class="loading-screen"><img src="data:image/gif;base64,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" alt="" class="loading-logo" /><p>Cargando Estado General de Proyectos DC…</p></div>`;
-  await loadAll();
+  root.innerHTML = `<div class="loading-screen"><p style="padding:40px;text-align:center">Cargando…</p></div>`;
+  try{
+    const fu = await initAuth();            // ¿hay una sesión de Firebase guardada en este navegador?
+    if (fu) await startSession();
+  }catch(e){
+    console.error(e);
+    authError = 'No se pudo conectar con el servidor. Revisa tu conexión e intenta de nuevo.';
+  }
   render();
   startAutoRefresh();
-  ensureDailyBackup();
+  if (currentUser){ ensureDailyBackup(); checkLegacyUsers(); }
 })();
 
 </script>

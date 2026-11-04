@@ -716,6 +716,8 @@ let pendingPurgeId = null;
 let pendingEmptyTrash = false;
 let pendingArchiveAudit = false;
 let pendingDeleteUserEmail = null;
+let pendingPurgeUserEmail = null;   // eliminar definitivamente a una persona (ya desactivada)
+let purgeError = '';
 let userModalState = null; // { mode:'new'|'reset', email?, draft:{} }
 let userActionError = '';
 let userActionNotice = null; // { title, body } shown after create/reset
@@ -1779,7 +1781,7 @@ function resetSessionState(){
   projects = []; users = []; trash = []; changelog = [];
   baseline.projects = baseline.trash = baseline.changelogSigs = null;
   dataReady = false; loadError = false; dataWarning = ''; saveError = '';
-  legacyUsers = []; userModalState = null; userActionNotice = null; userActionError = '';
+  legacyUsers = []; pendingPurgeUserEmail = null; purgeError = ''; userModalState = null; userActionNotice = null; userActionError = '';
   backupsState = { loading: false, days: [], msg: '', pendingFile: null };
 }
 async function fbSignOut(){
@@ -1969,6 +1971,7 @@ function renderApp(){
       ${pendingEmptyTrash ? renderConfirmEmptyTrash() : ''}
       ${userModalState ? renderUserModal() : ''}
       ${pendingDeleteUserEmail ? renderConfirmDeleteUser() : ''}
+      ${pendingPurgeUserEmail ? renderConfirmPurgeUser() : ''}
       ${pendingArchiveAudit ? renderConfirmArchiveAudit() : ''}
     </div>
   `;
@@ -2648,7 +2651,8 @@ function renderUsuarios(){
                   <button class="btn btn-text" data-action="open-edit-user" data-email="${esc(u.email)}">Editar</button>
                   <button class="btn btn-text" data-action="open-reset-user" data-email="${esc(u.email)}">Enviar enlace de contraseña</button>
                   ${u.active === false
-                    ? `<button class="btn btn-text" data-action="reactivate-user" data-email="${esc(u.email)}">Reactivar</button>`
+                    ? `<button class="btn btn-text" data-action="reactivate-user" data-email="${esc(u.email)}">Reactivar</button>
+                       <button class="btn btn-text btn-text-danger" data-action="confirm-purge-user" data-email="${esc(u.email)}">Eliminar</button>`
                     : `<button class="btn btn-text btn-text-danger" data-action="confirm-delete-user" data-email="${esc(u.email)}">Desactivar</button>`}
                 </td>` : ''}
               </tr>
@@ -2784,6 +2788,30 @@ function renderConfirmDeleteUser(){
         <div class="modal-footer">
           <button class="btn btn-text" data-action="cancel-delete-user">Cancelar</button>
           <button class="btn btn-danger" data-action="do-delete-user">Desactivar acceso</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderConfirmPurgeUser(){
+  const u = users.find(x => x.email === pendingPurgeUserEmail);
+  if (!u) return '';
+  return `
+  <div class="modal-overlay" data-action="cancel-purge-user">
+    <div class="modal-card modal-card-sm" data-stop-close>
+      <div class="modal-header"><h2>Eliminar persona</h2></div>
+      <div class="modal-form">
+        <p>Vas a <strong>eliminar definitivamente</strong> el perfil de <strong>${esc(u.name)}</strong> (${esc(u.email)}). Dejará de aparecer en la lista y esta acción no se puede deshacer desde la aplicación.</p>
+        <p class="auth-note">Su historial de cambios se conserva. Su cuenta de acceso en Firebase Authentication no se borra desde aquí; sin perfil no podrá entrar. Si solo quieres quitarle el acceso, es mejor dejarla desactivada.</p>
+        ${purgeError ? `<div class="auth-error">${esc(purgeError)}</div>` : ''}
+        <div class="field">
+          <label>Para confirmar, escribe su correo: <strong>${esc(u.email)}</strong></label>
+          <input type="text" id="purgeConfirmInput" autocomplete="off" placeholder="${esc(u.email)}" />
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-text" data-action="cancel-purge-user">Cancelar</button>
+          <button class="btn btn-danger" data-action="do-purge-user">Eliminar definitivamente</button>
         </div>
       </div>
     </div>
@@ -3390,13 +3418,14 @@ root.addEventListener('change', onRootChange);
 root.addEventListener('input', onRootInput);
 
 function onRootClick(e){
-  const overlay = e.target.closest('[data-action="close-modal-overlay"], [data-action="cancel-delete"], [data-action="close-user-modal-overlay"], [data-action="cancel-delete-user"], [data-action="cancel-archive-audit"], [data-action="close-trash-overlay"], [data-action="cancel-purge-item"], [data-action="cancel-empty-trash"], [data-action="close-notifications"], [data-action="close-custom-report-overlay"]');
+  const overlay = e.target.closest('[data-action="close-modal-overlay"], [data-action="cancel-delete"], [data-action="close-user-modal-overlay"], [data-action="cancel-delete-user"], [data-action="cancel-purge-user"], [data-action="cancel-archive-audit"], [data-action="close-trash-overlay"], [data-action="cancel-purge-item"], [data-action="cancel-empty-trash"], [data-action="close-notifications"], [data-action="close-custom-report-overlay"]');
   if (overlay && !e.target.closest('[data-stop-close]')){
     const a = overlay.dataset.action;
     if (a === 'close-modal-overlay'){ modalState = null; }
     else if (a === 'cancel-delete'){ pendingDeleteId = null; }
     else if (a === 'close-user-modal-overlay'){ userModalState = null; userActionError=''; }
     else if (a === 'cancel-delete-user'){ pendingDeleteUserEmail = null; }
+    else if (a === 'cancel-purge-user'){ pendingPurgeUserEmail = null; purgeError = ''; }
     else if (a === 'cancel-archive-audit'){ pendingArchiveAudit = false; }
     else if (a === 'close-trash-overlay'){ trashPanelOpen = false; }
     else if (a === 'cancel-purge-item'){ pendingPurgeId = null; }
@@ -3579,6 +3608,9 @@ function onRootClick(e){
     case 'confirm-delete-user': pendingDeleteUserEmail = btn.dataset.email; render(); break;
     case 'cancel-delete-user': pendingDeleteUserEmail = null; render(); break;
     case 'do-delete-user': doDeleteUser(); break;
+    case 'confirm-purge-user': pendingPurgeUserEmail = btn.dataset.email; purgeError = ''; render(); break;
+    case 'cancel-purge-user': pendingPurgeUserEmail = null; purgeError = ''; render(); break;
+    case 'do-purge-user': doPurgeUser(); break;
     case 'dismiss-user-notice': userActionNotice = null; render(); break;
   }
 }
@@ -3819,6 +3851,28 @@ async function doDeleteUser(){
     }catch(e){ alert(friendlyAuthError(e)); }
   }
   pendingDeleteUserEmail = null;
+  render();
+}
+// Eliminar definitivamente el PERFIL de una persona. Solo si ya está desactivada,
+// no es uno mismo y se escribe su correo para confirmar. (La cuenta de acceso en
+// Firebase Authentication no se puede borrar desde la app; sin perfil no entra.)
+async function doPurgeUser(){
+  if (!isAdminUser()) return;
+  const user = users.find(u => u.email === pendingPurgeUserEmail);
+  if (!user){ pendingPurgeUserEmail = null; render(); return; }
+  const input = document.getElementById('purgeConfirmInput');
+  if (!input || userDocId(input.value) !== userDocId(user.email)){ purgeError = 'El correo escrito no coincide. Escríbelo exactamente como aparece.'; render(); return; }
+  if (user.active !== false){ purgeError = 'Primero desactiva la cuenta; solo se pueden eliminar cuentas desactivadas.'; render(); return; }
+  if (currentUser && userDocId(currentUser.email) === userDocId(user.email)){ purgeError = 'No puedes eliminar tu propia cuenta.'; render(); return; }
+  if (user.role === 'admin' && activeAdmins().length < 1){ purgeError = 'Debe existir al menos un administrador activo.'; render(); return; }
+  try{
+    const { db, doc, fs } = await getFirebase();
+    await fs.deleteDoc(doc(db, 'usuarios', userDocId(user.email)));
+  }catch(e){ console.error(e); purgeError = friendlyAuthError(e); render(); return; }
+  users = users.filter(u => userDocId(u.email) !== userDocId(user.email));
+  logChange({ project:'—', text:`Eliminó definitivamente a ${user.name} (${user.email}).` });
+  pendingPurgeUserEmail = null; purgeError = '';
+  userActionNotice = { title:'Persona eliminada', code: user.email, body:'Se eliminó su perfil. Su cuenta de acceso sigue en Firebase Authentication, pero sin perfil no puede entrar. Si quieres, bórrala también en Authentication → Usuarios. Si vuelves a crearla con el mismo correo, conservará su contraseña anterior.' };
   render();
 }
 async function doReactivateUser(email){
@@ -6908,7 +6962,7 @@ async function doArchiveAudit(){
 // Además conserva la posición del scroll para que la pantalla no salte.
 let autoRefreshTimer = null;
 function isUserCurrentlyEditing(){
-  if (modalState || customReportState || userModalState || pendingDeleteId || pendingDeleteUserEmail || trashPanelOpen || pendingPurgeId || pendingEmptyTrash) return true;
+  if (modalState || customReportState || userModalState || pendingDeleteId || pendingDeleteUserEmail || pendingPurgeUserEmail || trashPanelOpen || pendingPurgeId || pendingEmptyTrash) return true;
   const el = document.activeElement;
   if (!el) return false;
   return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT';
